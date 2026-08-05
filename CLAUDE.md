@@ -33,7 +33,26 @@ GIMP や Photoshop のような多機能ソフトは「起動しても何をど�
 - **`Mat` は必ず `using` で破棄する。** GC の管理外のネイティブメモリであり、プレビュー更新のたびに生成して放置するとメモリが際限なく増える
 - **AnyCPU にしない。** OpenCvSharp のネイティブ DLL は x64 のみで、`DllNotFoundException` の原因になる
 - **`Cv2.ImWrite` は Exif を書き出さない。** つまり Exif 削除は既定の挙動であり、実装が必要なのは「残す」ほう（初版では対応しない）
-- **`Cv2.ImRead` は Exif の Orientation を適用済みで読み込む。** Exif が消えても画像の向きは正しくなる
+- **`Cv2.ImRead` は使わない。** ファイル名を ANSI でネイティブへ渡すため、
+  CP932 外の文字を含むパスで ArgumentException が発生し、一括処理が
+  中断する。`File.ReadAllBytes` + `Cv2.ImDecode` を使うこと
+- **`ImDecode` は Exif の Orientation を適用済みで読み込む**（検証済み。
+  ImRead と寸法・回転方向とも一致）。自前で回転補正を加えると二重に回るので、
+  絶対に追加しないこと。回さずに読みたい場合は
+  `ImreadModes.IgnoreOrientation` を使う
+
+---
+
+## コーディング規約
+
+- **コメントは日本語で書く。** 「何をしているか」ではなく
+  「なぜそうしているか」を書く
+- public なクラス・メソッドには XML ドキュメントコメント（`///`）を
+  日本語で付ける
+- 識別子（クラス名・変数名）は英語。C# の標準的な命名規則に従う
+- UI に表示する文言は日本語
+- コミットメッセージは Conventional Commits 形式（`feat:` `fix:`
+  `chore:` など）で、説明部分は日本語
 
 ---
 
