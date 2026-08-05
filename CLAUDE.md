@@ -53,6 +53,8 @@ GIMP や Photoshop のような多機能ソフトは「起動しても何をど�
 - UI に表示する文言は日本語
 - コミットメッセージは Conventional Commits 形式（`feat:` `fix:`
   `chore:` など）で、説明部分は日本語
+- 作業はフィーチャーブランチで行い、確認後に `main` へ `--ff-only` で
+  マージする
 
 ---
 
