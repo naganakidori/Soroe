@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Soroe.Common;
 using Soroe.Models;
 using Soroe.Services;
 
@@ -46,7 +47,8 @@ public sealed partial class MainViewModel : ObservableObject
     /// 処理対象のファイル。
     /// </summary>
     /// <remarks>
-    /// 連番リネームの順序はこの表示順に固定するため、追加した順を保つ。
+    /// 連番リネームの順序はこの表示順に固定する。追加したバッチごとに自然順で
+    /// 並べ替えて末尾に足すため、以降は順序が勝手に変わらない。
     /// </remarks>
     public ObservableCollection<ImageItem> Files { get; } = [];
 
@@ -111,7 +113,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// </summary>
     private void Add(IEnumerable<string> candidates)
     {
-        var added = 0;
+        var added = new List<string>();
         var duplicated = 0;
 
         foreach (var path in candidates)
@@ -129,19 +131,29 @@ public sealed partial class MainViewModel : ObservableObject
                 continue;
             }
 
-            Files.Add(new ImageItem(fullPath));
-            added++;
+            added.Add(fullPath);
+        }
+
+        // Directory.EnumerateFiles の順序も、ドロップ時に OS が渡す順序も保証されない。
+        // 連番リネームは表示順に従うため、ここで並びを確定させる。
+        added.Sort(NaturalPathComparer.Instance);
+
+        // 並べ替えるのは追加分だけ。リスト全体を並べ替え直すと、追加したものが
+        // 途中に紛れて追加できたのかどうかが分からなくなる
+        foreach (var path in added)
+        {
+            Files.Add(new ImageItem(path));
         }
 
         // 1 枚目を自動で選ぶ。追加した直後に何も表示されないと、追加できたかが分からないため
         SelectedFile ??= Files.FirstOrDefault();
 
-        StatusMessage = (added, duplicated) switch
+        StatusMessage = (added.Count, duplicated) switch
         {
             (0, 0) => "対応するファイルがありませんでした（.jpg .jpeg .png .bmp .webp）",
             (0, _) => $"すべて追加済みでした（合計 {Files.Count} 件）",
-            (_, 0) => $"{added} 件を追加しました（合計 {Files.Count} 件）",
-            _ => $"{added} 件を追加しました。{duplicated} 件は追加済みのため除外（合計 {Files.Count} 件）",
+            (_, 0) => $"{added.Count} 件を追加しました（合計 {Files.Count} 件）",
+            _ => $"{added.Count} 件を追加しました。{duplicated} 件は追加済みのため除外（合計 {Files.Count} 件）",
         };
     }
 
