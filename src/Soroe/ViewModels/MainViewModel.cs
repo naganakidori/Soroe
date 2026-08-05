@@ -136,11 +136,14 @@ public sealed partial class MainViewModel : ObservableObject
 
         // Directory.EnumerateFiles の順序も、ドロップ時に OS が渡す順序も保証されない。
         // 連番リネームは表示順に従うため、ここで並びを確定させる。
-        added.Sort(NaturalPathComparer.Instance);
-
+        //
+        // List<T>.Sort ではなく OrderBy を使うこと。NaturalPathComparer は推移性を
+        // 保証できず、List<T>.Sort / Array.Sort の整合性チェックに引っかかると
+        // InvalidOperationException で落ちる。詳細は NaturalPathComparer の注記を参照。
+        //
         // 並べ替えるのは追加分だけ。リスト全体を並べ替え直すと、追加したものが
         // 途中に紛れて追加できたのかどうかが分からなくなる
-        foreach (var path in added)
+        foreach (var path in added.OrderBy(p => p, NaturalPathComparer.Instance))
         {
             Files.Add(new ImageItem(path));
         }
