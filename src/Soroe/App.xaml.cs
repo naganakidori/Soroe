@@ -19,7 +19,7 @@ public partial class App : Application
         // DI コンテナを導入するほどの規模ではないので、実装の差し替え口だけを用意しておく。
         var window = new MainWindow
         {
-            DataContext = new MainViewModel(new ImageLoader()),
+            DataContext = new MainViewModel(new ImageLoader(), new FolderPicker()),
         };
         window.Show();
     }

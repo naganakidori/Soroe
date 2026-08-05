@@ -33,9 +33,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (DataContext is MainViewModel viewModel && viewModel.AddFilesCommand.CanExecute(paths))
+        if (DataContext is MainViewModel viewModel && viewModel.AddPathsCommand.CanExecute(paths))
         {
-            viewModel.AddFilesCommand.Execute(paths);
+            viewModel.AddPathsCommand.Execute(paths);
         }
 
         e.Handled = true;
