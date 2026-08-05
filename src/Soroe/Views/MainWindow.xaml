@@ -14,6 +14,20 @@
         AllowDrop="True"
         DragOver="OnDragOver"
         Drop="OnDrop">
+    <Window.Resources>
+        <!-- 調整パネルの分類見出し。3 分類で共通に使う -->
+        <Style x:Key="SectionHeaderStyle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Opacity" Value="0.75" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+
+        <!-- 調整項目 1 行分の並び。項目名 / スライダー / 現在値 -->
+        <Style x:Key="AdjustmentRowStyle" TargetType="Grid">
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+    </Window.Resources>
+
     <!-- ウィンドウ全体でドロップを受ける。落とす場所を狙わせないほうが迷わない -->
     <Grid Margin="12" Background="Transparent">
         <Grid.RowDefinitions>
@@ -94,35 +108,98 @@
                           HorizontalAlignment="Stretch"
                           Background="Transparent" />
 
-            <Border Grid.Column="2"
-                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="8">
-                <Grid>
-                    <Image Source="{Binding PreviewImage}"
-                           Stretch="Uniform"
-                           StretchDirection="DownOnly"
-                           Margin="12" />
+            <!-- 上がプレビュー、下が調整パネル -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" MinHeight="120" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-                    <TextBlock Text="プレビュー"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center"
-                               Opacity="0.6"
-                               IsHitTestVisible="False">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding PreviewImage}" Value="{x:Null}">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Grid>
-            </Border>
+                <Border Grid.Row="0"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                    <Grid>
+                        <Image Source="{Binding PreviewImage}"
+                               Stretch="Uniform"
+                               StretchDirection="DownOnly"
+                               Margin="12" />
+
+                        <TextBlock Text="プレビュー"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Opacity="0.6"
+                                   IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding PreviewImage}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="1"
+                        Margin="0,10,0,0"
+                        Padding="14,12"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                    <StackPanel>
+                        <!--
+                            調整パネルは 3 分類で区切る（CLAUDE.md「調整項目」）。
+                              1. キャンバスを変える … 回転、リサイズ
+                              2. 画素値を変える     … 明るさ、コントラスト、彩度、
+                                                      グレースケール、二値化、シャープ
+                              3. 描き足す           … 枠線
+                            残りの分類は、この StackPanel と同じ形（見出し + 項目行）を
+                            この前後に足す。現在は 2 のうち明るさのみ実装している。
+                        -->
+                        <TextBlock Text="画素値を変える" Style="{StaticResource SectionHeaderStyle}" />
+
+                        <Grid Style="{StaticResource AdjustmentRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <CheckBox Grid.Column="0"
+                                      Content="明るさ"
+                                      MinWidth="92"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.Brightness.Enabled}" />
+
+                            <!--
+                                Delay を入れて、つまみを動かしている間の更新要求を間引く。
+                                取りこぼしても ViewModel 側が最新の要求だけを残すので破綻しない。
+                            -->
+                            <Slider Grid.Column="1"
+                                    Margin="8,0"
+                                    VerticalAlignment="Center"
+                                    Minimum="-100"
+                                    Maximum="100"
+                                    TickFrequency="1"
+                                    IsSnapToTickEnabled="True"
+                                    IsEnabled="{Binding Settings.Brightness.Enabled}"
+                                    Value="{Binding Settings.Brightness.Value, Delay=30}" />
+
+                            <TextBlock Grid.Column="2"
+                                       MinWidth="34"
+                                       TextAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       Text="{Binding Settings.Brightness.Value}" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Grid>
         </Grid>
 
         <TextBlock Grid.Row="2"

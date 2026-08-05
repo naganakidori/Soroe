@@ -13,15 +13,24 @@ namespace Soroe.ViewModels;
 /// メインウィンドウの ViewModel。
 /// </summary>
 /// <remarks>
-/// この層は OpenCvSharp を参照しない。画像の読み込みは <see cref="IImageLoader" /> 越しに行う。
+/// この層は OpenCvSharp を参照しない。画像の読み込みと加工は <see cref="IImageRenderer" /> 越しに行う。
 /// </remarks>
 public sealed partial class MainViewModel : ObservableObject
 {
+    /// <summary>
+    /// プレビュー用に読み込むときの長辺の上限。
+    /// </summary>
+    /// <remarks>
+    /// スライダーを動かすたびに全画素を処理するため、原寸のままでは追従できない。
+    /// 表示に足りる程度まで縮めてから調整をかけ、書き出し時にフル解像度で計算し直す。
+    /// </remarks>
+    private const int PreviewMaxEdge = 1600;
+
     /// <summary>取り扱う拡張子。これ以外のファイルは追加時に無視する。</summary>
     private static readonly HashSet<string> SupportedExtensions =
         new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".bmp", ".webp" };
 
-    private readonly IImageLoader _imageLoader;
+    private readonly IImageRenderer _renderer;
     private readonly IFolderPicker _folderPicker;
 
     /// <summary>
@@ -30,17 +39,36 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly HashSet<string> _addedPaths = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// プレビューの更新を 1 度に 1 つだけに制限する。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="_previewSource" /> の差し替えと破棄もこの中で行うため、
+    /// レンダリング中に元画像が破棄される事故が起きない。
+    /// </remarks>
+    private readonly SemaphoreSlim _previewGate = new(1, 1);
+
+    /// <summary>
+    /// プレビュー更新の要求番号。新しい要求が来た時点で古い要求は用済みになる。
+    /// </summary>
+    private int _previewVersion;
+
+    private RenderSource? _previewSource;
+
+    /// <summary>
     /// <see cref="MainViewModel" /> の新しいインスタンスを生成する。
     /// </summary>
-    /// <param name="imageLoader">画像の読み込みに使う実装。</param>
+    /// <param name="renderer">画像の読み込みと加工に使う実装。</param>
     /// <param name="folderPicker">フォルダ選択ダイアログの実装。</param>
-    public MainViewModel(IImageLoader imageLoader, IFolderPicker folderPicker)
+    public MainViewModel(IImageRenderer renderer, IFolderPicker folderPicker)
     {
-        _imageLoader = imageLoader;
+        _renderer = renderer;
         _folderPicker = folderPicker;
 
         // 件数が変わるとクリアボタンの有効・無効も変わる
         Files.CollectionChanged += (_, _) => ClearCommand.NotifyCanExecuteChanged();
+
+        // 調整値が変わったらプレビューを作り直す。元画像は読み直さない
+        Settings.Changed += (_, _) => _ = UpdatePreviewAsync(reloadSource: false);
     }
 
     /// <summary>
@@ -51,6 +79,16 @@ public sealed partial class MainViewModel : ObservableObject
     /// 並べ替えて末尾に足すため、以降は順序が勝手に変わらない。
     /// </remarks>
     public ObservableCollection<ImageItem> Files { get; } = [];
+
+    /// <summary>
+    /// 全件に適用する調整の設定。
+    /// </summary>
+    /// <remarks>
+    /// プリセットの読み込みを実装する際は、このインスタンスを差し替えるのではなく
+    /// 各項目に値を書き込むこと。差し替えるとバインドと <see cref="ProcessingSettings.Changed" />
+    /// の購読が切れる。
+    /// </remarks>
+    public ProcessingSettings Settings { get; } = new();
 
     /// <summary>リストで選択中の 1 件。プレビューの対象になる。</summary>
     [ObservableProperty]
@@ -102,6 +140,8 @@ public sealed partial class MainViewModel : ObservableObject
     {
         Files.Clear();
         _addedPaths.Clear();
+
+        // 選択を外すと、プレビューの更新経路で元画像も破棄される
         SelectedFile = null;
         StatusMessage = "画像ファイルまたはフォルダをドロップしてください";
     }
@@ -195,49 +235,91 @@ public sealed partial class MainViewModel : ObservableObject
     partial void OnSelectedFileChanged(ImageItem? value)
     {
         // プロパティの変更通知は同期的に返し、読み込みは待たせない
-        _ = UpdatePreviewAsync(value);
+        _ = UpdatePreviewAsync(reloadSource: true);
     }
 
     /// <summary>
-    /// 選択中の 1 枚をプレビューに読み込む。
+    /// プレビューを作り直す。
     /// </summary>
-    private async Task UpdatePreviewAsync(ImageItem? item)
+    /// <param name="reloadSource">
+    /// 選択が変わった場合は <see langword="true" />。調整値だけが変わった場合は
+    /// <see langword="false" /> を渡し、読み込み済みの元画像を使い回す。
+    /// </param>
+    /// <remarks>
+    /// スライダーを動かしている間は要求が連続して届く。処理中に届いた要求は待たせ、
+    /// 待っている間にさらに新しい要求が来たら古いほうは何もせず抜ける（最新のものだけが残る）。
+    /// </remarks>
+    private async Task UpdatePreviewAsync(bool reloadSource)
     {
-        if (item is null)
-        {
-            PreviewImage = null;
-            return;
-        }
+        var version = Interlocked.Increment(ref _previewVersion);
 
+        await _previewGate.WaitAsync().ConfigureAwait(true);
         try
         {
-            // フル解像度の展開は数百ミリ秒かかることがあるので UI スレッドから外す。
-            // ImageLoader は Freeze 済みの BitmapSource を返すため、そのまま UI に渡せる。
-            var image = await Task.Run(() => _imageLoader.Load(item.FullPath));
-
-            // 読み込み中に選択が変わっていたら、古い画像で上書きしない
-            if (!ReferenceEquals(item, SelectedFile))
+            // 待っている間に新しい要求が来ていた。この要求は捨てる
+            if (Volatile.Read(ref _previewVersion) != version)
             {
                 return;
             }
 
-            if (image is null)
+            var item = SelectedFile;
+
+            if (reloadSource)
+            {
+                _previewSource?.Dispose();
+                _previewSource = null;
+
+                if (item is not null)
+                {
+                    _previewSource = await Task.Run(() => _renderer.Load(item.FullPath, PreviewMaxEdge))
+                        .ConfigureAwait(true);
+
+                    if (_previewSource is null)
+                    {
+                        PreviewImage = null;
+                        StatusMessage = $"読み込めませんでした: {item.FileName}";
+                        return;
+                    }
+                }
+            }
+
+            var source = _previewSource;
+            if (source is null)
             {
                 PreviewImage = null;
-                StatusMessage = $"読み込めませんでした: {item.FileName}";
                 return;
             }
 
-            PreviewImage = image;
-            StatusMessage = $"{item.FileName}（{image.PixelWidth} × {image.PixelHeight}）";
+            // バックグラウンドで処理している間に UI 側の値が変わっても影響しないよう、
+            // 開始時点の値を写してから渡す
+            var snapshot = Settings.Clone();
+            var bitmap = await Task.Run(() => _renderer.Render(source, snapshot, source.Scale))
+                .ConfigureAwait(true);
+
+            // 処理中に選択や調整値が変わっていたら、古い結果で上書きしない
+            if (Volatile.Read(ref _previewVersion) != version)
+            {
+                return;
+            }
+
+            PreviewImage = bitmap;
+
+            if (item is not null)
+            {
+                StatusMessage = $"{item.FileName}（{source.OriginalWidth} × {source.OriginalHeight}）";
+            }
         }
         catch (Exception ex)
         {
-            if (ReferenceEquals(item, SelectedFile))
+            if (Volatile.Read(ref _previewVersion) == version)
             {
                 PreviewImage = null;
-                StatusMessage = $"読み込みに失敗しました: {item.FileName}（{ex.Message}）";
+                StatusMessage = $"プレビューの生成に失敗しました（{ex.Message}）";
             }
+        }
+        finally
+        {
+            _previewGate.Release();
         }
     }
 }
