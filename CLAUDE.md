@@ -101,6 +101,30 @@ public sealed class ProcessingSettings
 
 `SchemaVersion` は初版から必ず入れる。後から項目を変更したときに古いプリセットを分岐処理できる。
 
+#### 値の範囲は Option 側で丸める（必須）
+
+範囲を持つ値（明るさ、リサイズの寸法、シャープの強さ、枠線の太さなど）は、**上下限の定数を Option クラスに定義し、setter で `Math.Clamp` して丸める**。
+
+```csharp
+public sealed partial class BrightnessOption : ObservableObject
+{
+    public const int MinValue = -100;
+    public const int MaxValue = 100;
+
+    private int _value;
+
+    public int Value
+    {
+        get => _value;
+        set => SetProperty(ref _value, Math.Clamp(value, MinValue, MaxValue));
+    }
+}
+```
+
+View 側だけで丸めてはいけない。**依存関係プロパティの `CoerceValue` による丸めは、TwoWay バインディングのソースまで伝わらない**（WPF の仕様）。View で丸めたつもりでも設定値は範囲外のままになり、画面には 100 と表示されているのに実際は 1000 で処理される、という表示と結果の食い違いが起きる。プレビューと書き出しの一致が最大の差別化ポイントである以上、ここは必ずデータ側で保証する。
+
+上下限の定数は XAML からも参照し、スライダーと数値入力の範囲を 1 箇所で定義する。ただし `Slider.Minimum` は `double` であり **`x:Static` は型変換をしない**ため、`int` の定数を直接渡すと実行時に落ちる。`{Binding Source={x:Static ...}, Mode=OneTime}` と書けば変換が効く。
+
 ### プレビューとレンダリング
 
 - **プレビュー**: 縮小した画像に対してチェーンを適用し、リアルタイムに反映
