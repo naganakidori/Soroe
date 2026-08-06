@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
 using Soroe.ViewModels;
 
 namespace Soroe.Views;
@@ -14,6 +16,24 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+    }
+
+    /// <summary>
+    /// 調整項目のスライダー上でホイールを回したときに 1 目盛り動かす。
+    /// </summary>
+    /// <remarks>
+    /// つまみを狙わずに値を詰めるための補助。既定では Slider はホイールに反応せず、
+    /// 親のスクロールに流れてしまうため、ここで受け取って処理する。
+    /// </remarks>
+    private void OnSliderMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not Slider slider || !slider.IsEnabled)
+        {
+            return;
+        }
+
+        slider.Value += Math.Sign(e.Delta) * (slider.SmallChange == 0 ? 1 : slider.SmallChange);
+        e.Handled = true;
     }
 
     private void OnDragOver(object sender, DragEventArgs e)

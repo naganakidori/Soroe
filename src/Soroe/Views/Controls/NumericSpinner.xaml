@@ -1,0 +1,104 @@
+<UserControl x:Class="Soroe.Views.Controls.NumericSpinner"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             PreviewMouseWheel="OnMouseWheel">
+    <UserControl.Resources>
+        <!--
+            Fluent テーマの TextBox は、入力中に消去用の × ボタンをテンプレート内に出す。
+            数値入力では空にする操作に意味がなく（確定時に元の値へ戻るだけ）、
+            押しても何も起きないボタンが見えるのは紛らわしい。
+            テンプレートごと差し替えて出さないようにする。
+            見た目は Fluent のブラシをそのまま参照しているので、Light/Dark とも追従する。
+        -->
+        <Style x:Key="SpinnerTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource TextControlBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextControlForeground}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource TextControlForeground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource TextControlElevationBorderBrush}" />
+            <Setter Property="BorderThickness" Value="{DynamicResource TextControlBorderThemeThickness}" />
+            <Setter Property="Padding" Value="{DynamicResource TextControlThemePadding}" />
+            <Setter Property="MinHeight" Value="{DynamicResource TextControlThemeMinHeight}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Padding="{TemplateBinding Padding}"
+                                          VerticalAlignment="Center"
+                                          Focusable="False"
+                                          HorizontalScrollBarVisibility="Hidden"
+                                          VerticalScrollBarVisibility="Hidden" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root"
+                                        Property="Background"
+                                        Value="{DynamicResource TextControlBackgroundPointerOver}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Root"
+                                        Property="Background"
+                                        Value="{DynamicResource TextControlBackgroundFocused}" />
+                                <Setter TargetName="Root"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource TextControlElevationBorderFocusedBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Root"
+                                        Property="Background"
+                                        Value="{DynamicResource TextControlBackgroundDisabled}" />
+                                <Setter TargetName="Root"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource TextControlBorderBrushDisabled}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource TextControlForegroundDisabled}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <TextBox x:Name="ValueText"
+                 Style="{StaticResource SpinnerTextBoxStyle}"
+                 MinWidth="46"
+                 MaxLength="6"
+                 TextAlignment="Right"
+                 VerticalContentAlignment="Center"
+                 GotKeyboardFocus="OnTextGotKeyboardFocus"
+                 LostFocus="OnTextLostFocus"
+                 KeyDown="OnTextKeyDown" />
+
+        <!-- 長押しで連続して増減できるよう RepeatButton を使う -->
+        <StackPanel Grid.Column="1" Margin="2,0,0,0">
+            <RepeatButton x:Name="UpButton"
+                          Content="▲"
+                          Width="22"
+                          Height="16"
+                          Padding="0"
+                          FontSize="8"
+                          VerticalContentAlignment="Center"
+                          Click="OnStepUp" />
+            <RepeatButton x:Name="DownButton"
+                          Content="▼"
+                          Width="22"
+                          Height="16"
+                          Padding="0"
+                          FontSize="8"
+                          Margin="0,1,0,0"
+                          VerticalContentAlignment="Center"
+                          Click="OnStepDown" />
+        </StackPanel>
+    </Grid>
+</UserControl>

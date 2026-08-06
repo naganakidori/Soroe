@@ -3,6 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="clr-namespace:Soroe.Views.Controls"
+        xmlns:models="clr-namespace:Soroe.Models"
         xmlns:vm="clr-namespace:Soroe.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
@@ -22,9 +24,28 @@
             <Setter Property="Margin" Value="0,0,0,8" />
         </Style>
 
-        <!-- 調整項目 1 行分の並び。項目名 / スライダー / 現在値 -->
+        <!-- 調整項目 1 行分の並び。項目名 / スライダー / 数値入力 -->
         <Style x:Key="AdjustmentRowStyle" TargetType="Grid">
             <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <!--
+            調整項目のスライダーに共通の振る舞い。項目が増えたらこれを適用するだけでよい。
+            IsMoveToPointEnabled は、目盛りの上を押したときにその位置へつまみを飛ばす。
+            既定は 1 目盛りずつの移動で、シークバーの挙動と違って戸惑うため。
+            ホイールでの増減は、つまみを狙わずに 1 ずつ詰めるための補助。
+        -->
+        <!--
+            BasedOn を必ず付けること。省略すると Fluent テーマの暗黙スタイルが
+            適用されなくなり、既定のスライダーの見た目に戻ってしまう。
+        -->
+        <Style x:Key="AdjustmentSliderStyle" TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}">
+            <Setter Property="Margin" Value="8,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TickFrequency" Value="1" />
+            <Setter Property="IsSnapToTickEnabled" Value="True" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+            <EventSetter Event="PreviewMouseWheel" Handler="OnSliderMouseWheel" />
         </Style>
     </Window.Resources>
 
@@ -178,24 +199,31 @@
                                       IsChecked="{Binding Settings.Brightness.Enabled}" />
 
                             <!--
-                                Delay を入れて、つまみを動かしている間の更新要求を間引く。
-                                取りこぼしても ViewModel 側が最新の要求だけを残すので破綻しない。
+                                バインディングに Delay は入れない。Delay は値が変わるたびに
+                                タイマーが再スタートするため、つまみを動かし続けている間は
+                                設定値が更新されず、数値表示が固まって見える。
+                                プレビュー 1 枚のレンダリングは 7 ms 程度なので間引く必要はなく、
+                                連続した要求は ViewModel 側が最新の 1 つに畳む。
+                            -->
+                            <!--
+                                Slider.Minimum は double。x:Static は型変換をしないため
+                                int の定数をそのまま渡すと実行時に落ちる。Binding を挟むと
+                                変換が効くので、範囲の定義は Model 側の 1 箇所で済ませられる。
                             -->
                             <Slider Grid.Column="1"
-                                    Margin="8,0"
-                                    VerticalAlignment="Center"
-                                    Minimum="-100"
-                                    Maximum="100"
-                                    TickFrequency="1"
-                                    IsSnapToTickEnabled="True"
+                                    Style="{StaticResource AdjustmentSliderStyle}"
+                                    Minimum="{Binding Source={x:Static models:BrightnessOption.MinValue}, Mode=OneTime}"
+                                    Maximum="{Binding Source={x:Static models:BrightnessOption.MaxValue}, Mode=OneTime}"
                                     IsEnabled="{Binding Settings.Brightness.Enabled}"
-                                    Value="{Binding Settings.Brightness.Value, Delay=30}" />
+                                    Value="{Binding Settings.Brightness.Value}" />
 
-                            <TextBlock Grid.Column="2"
-                                       MinWidth="34"
-                                       TextAlignment="Right"
-                                       VerticalAlignment="Center"
-                                       Text="{Binding Settings.Brightness.Value}" />
+                            <!-- スライダーでは 1 目盛りが 2px 程度になり狙えないため、詰めはこちらで -->
+                            <controls:NumericSpinner Grid.Column="2"
+                                                     VerticalAlignment="Center"
+                                                     Minimum="{x:Static models:BrightnessOption.MinValue}"
+                                                     Maximum="{x:Static models:BrightnessOption.MaxValue}"
+                                                     IsEnabled="{Binding Settings.Brightness.Enabled}"
+                                                     Value="{Binding Settings.Brightness.Value}" />
                         </Grid>
                     </StackPanel>
                 </Border>
