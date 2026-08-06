@@ -18,6 +18,8 @@
         Drop="OnDrop"
         Closing="OnClosing">
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
         <!-- 調整パネルの分類見出し。3 分類で共通に使う -->
         <Style x:Key="SectionHeaderStyle" TargetType="TextBlock">
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -358,6 +360,72 @@
                             Padding="14,4"
                             Command="{Binding SelectOutputFolderCommand}" />
                 </Grid>
+
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsExporting}" Value="True">
+                                    <Setter Property="IsEnabled" Value="False" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="形式:" VerticalAlignment="Center" Margin="0,0,8,0" />
+
+                    <ComboBox MinWidth="168"
+                              VerticalAlignment="Center"
+                              ItemsSource="{Binding ExportFormats}"
+                              DisplayMemberPath="Label"
+                              SelectedValuePath="Format"
+                              SelectedValue="{Binding Output.Format}" />
+
+                    <!-- 「元の形式を維持」では JPEG にも WebP にもなりうるので、両方出す -->
+                    <StackPanel Orientation="Horizontal"
+                                Margin="20,0,0,0"
+                                Visibility="{Binding ShowJpegQuality, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="JPEG 品質" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <controls:NumericSpinner VerticalAlignment="Center"
+                                                 Minimum="{x:Static models:ExportSettings.MinQuality}"
+                                                 Maximum="{x:Static models:ExportSettings.MaxQuality}"
+                                                 Step="5"
+                                                 Value="{Binding Output.JpegQuality}" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal"
+                                Margin="20,0,0,0"
+                                Visibility="{Binding ShowWebPQuality, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="WebP 品質" VerticalAlignment="Center" Margin="0,0,6,0" />
+
+                        <!-- 可逆のときは品質が効かないので触れないようにする -->
+                        <controls:NumericSpinner VerticalAlignment="Center"
+                                                 Minimum="{x:Static models:ExportSettings.MinWebPQuality}"
+                                                 Maximum="{x:Static models:ExportSettings.MaxQuality}"
+                                                 Step="5"
+                                                 Value="{Binding Output.WebPQuality}">
+                            <controls:NumericSpinner.Style>
+                                <Style TargetType="controls:NumericSpinner">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Output.WebPLossless}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </controls:NumericSpinner.Style>
+                        </controls:NumericSpinner>
+
+                        <CheckBox Content="可逆（ファイルサイズは大きくなります）"
+                                  Margin="10,0,0,0"
+                                  VerticalAlignment="Center"
+                                  IsChecked="{Binding Output.WebPLossless}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock Text="透過は白で塗り潰されます"
+                           Margin="0,6,0,0"
+                           FontSize="11"
+                           Opacity="0.6" />
 
                 <!-- 実行前に、実際に書き出される先を 1 行で見せる -->
                 <TextBlock Text="{Binding OutputPathPreview}"

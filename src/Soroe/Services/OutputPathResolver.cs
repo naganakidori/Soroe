@@ -41,9 +41,7 @@ public sealed class OutputPathResolver
 
         var folder = Path.GetFullPath(settings.Folder);
         var name = Path.GetFileNameWithoutExtension(sourcePath);
-
-        // 第 1 段は「元の形式を維持」のみ。形式の選択は第 2 段でここに入る
-        var extension = Path.GetExtension(sourcePath);
+        var extension = ResolveExtension(sourcePath, settings.Format);
 
         var candidate = Path.Combine(folder, name + extension);
         if (!File.Exists(candidate))
@@ -62,4 +60,21 @@ public sealed class OutputPathResolver
 
         throw new IOException($"同名のファイルが多すぎて連番を付けられません: {name}{extension}");
     }
+
+    /// <summary>
+    /// 出力する形式から拡張子を決める。
+    /// </summary>
+    /// <remarks>
+    /// 「元の形式を維持」では元ファイルの拡張子をそのまま引き継ぐ。<c>.JPG</c> のような
+    /// 大文字も、また <c>.jpg</c> と <c>.jpeg</c> の違いも変えない。ユーザーが付けた名前を
+    /// 勝手に書き換えないため。
+    /// </remarks>
+    private static string ResolveExtension(string sourcePath, ExportFormat format) => format switch
+    {
+        ExportFormat.Jpeg => ".jpg",
+        ExportFormat.Png => ".png",
+        ExportFormat.Bmp => ".bmp",
+        ExportFormat.WebP => ".webp",
+        _ => Path.GetExtension(sourcePath),
+    };
 }

@@ -90,6 +90,10 @@ public sealed partial class MainViewModel : ObservableObject
         {
             RunExportCommand.NotifyCanExecuteChanged();
             UpdateOutputPreview();
+
+            // 形式によって出す品質欄が変わる
+            OnPropertyChanged(nameof(ShowJpegQuality));
+            OnPropertyChanged(nameof(ShowWebPQuality));
         };
 
         UpdateOutputPreview();
@@ -160,6 +164,26 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>書き出しの設定。</summary>
     public ExportSettings Output { get; } = new();
+
+    /// <summary>出力形式のドロップダウンに並べる項目。</summary>
+    public IReadOnlyList<ExportFormatChoice> ExportFormats { get; } =
+    [
+        new(ExportFormat.KeepOriginal, "元の形式を維持"),
+        new(ExportFormat.Jpeg, "JPEG (.jpg)"),
+        new(ExportFormat.Png, "PNG (.png)"),
+        new(ExportFormat.Bmp, "BMP (.bmp)"),
+        new(ExportFormat.WebP, "WebP (.webp)"),
+    ];
+
+    /// <summary>JPEG 品質の欄を出すかどうか。</summary>
+    /// <remarks>
+    /// 「元の形式を維持」のときは入力次第で JPEG にも WebP にもなるため、両方出す。
+    /// 隠すと、実際に効いている設定が見えないことになる。
+    /// </remarks>
+    public bool ShowJpegQuality => Output.Format is ExportFormat.KeepOriginal or ExportFormat.Jpeg;
+
+    /// <summary>WebP 品質の欄を出すかどうか。</summary>
+    public bool ShowWebPQuality => Output.Format is ExportFormat.KeepOriginal or ExportFormat.WebP;
 
     /// <summary>実行ボタンの上に出す、出力先の 1 行表示。</summary>
     [ObservableProperty]

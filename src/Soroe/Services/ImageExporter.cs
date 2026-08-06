@@ -80,7 +80,7 @@ public sealed class ImageExporter : IImageExporter
                     continue;
                 }
 
-                ExportOne(sourcePath, outputPath, processing);
+                ExportOne(sourcePath, outputPath, processing, settings);
                 exported++;
             }
             catch (Exception ex)
@@ -101,7 +101,8 @@ public sealed class ImageExporter : IImageExporter
     /// <summary>
     /// 1 枚を書き出す。
     /// </summary>
-    private void ExportOne(string sourcePath, string outputPath, ProcessingSettings processing)
+    private void ExportOne(
+        string sourcePath, string outputPath, ProcessingSettings processing, ExportSettings settings)
     {
         byte[] bytes;
 
@@ -113,7 +114,13 @@ public sealed class ImageExporter : IImageExporter
                 throw new IOException("画像を読み込めませんでした。");
             }
 
-            var encode = new EncodeSettings { Extension = Path.GetExtension(outputPath) };
+            // 拡張子は OutputPathResolver が形式に合わせて決めている
+            var encode = new EncodeSettings
+            {
+                Extension = Path.GetExtension(outputPath),
+                JpegQuality = settings.JpegQuality,
+                WebPQuality = settings.EffectiveWebPQuality,
+            };
             bytes = _renderer.Encode(source, processing, source.Scale, encode);
         }
 
