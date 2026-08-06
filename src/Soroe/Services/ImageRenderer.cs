@@ -64,7 +64,10 @@ public sealed class ImageRenderer : IImageRenderer
     public BitmapSource Render(RenderSource source, ProcessingSettings settings, double previewScale)
     {
         // 適用処理は Encode と共有する。ここで独自に加工を足さないこと
-        using var result = Apply(source.Image, settings, previewScale);
+        using var result = Apply(
+            source.Image,
+            settings,
+            new RenderContext(source.OriginalWidth, source.OriginalHeight, previewScale));
 
         var bitmap = result.ToWriteableBitmap();
 
@@ -79,7 +82,10 @@ public sealed class ImageRenderer : IImageRenderer
     {
         // 適用処理は Render と共有する。ここで独自に加工を足さないこと。
         // 分けた瞬間に「プレビューと出力が違う」という最悪の不具合が生まれる
-        using var result = Apply(source.Image, settings, previewScale);
+        using var result = Apply(
+            source.Image,
+            settings,
+            new RenderContext(source.OriginalWidth, source.OriginalHeight, previewScale));
 
         // Cv2.ImWrite は使わない。ImRead と同じくファイル名を ANSI でネイティブへ渡すため、
         // CP932 外の文字を含む出力パスで例外になり、一括処理が中断する。
@@ -104,17 +110,38 @@ public sealed class ImageRenderer : IImageRenderer
     /// 現時点で実装しているのは 3. の明るさのみ。残りはこのメソッドに順番どおり挿入していく。
     /// </para>
     /// <para>
-    /// <paramref name="previewScale" /> は元画像に対する現在の倍率。プレビューは既に
-    /// 縮小されているため、2. リサイズと 8. 枠線の太さはこの倍率を掛けてから適用しないと、
-    /// プレビューと書き出し結果がずれる。明るさは画素値だけを変えるため倍率の影響を受けない。
+    /// 寸法に関わる調整（2. リサイズ、8. 枠線の太さ）は、まず元画像に対する出力寸法を
+    /// 決めてから <see cref="RenderContext.PreviewScale" /> を掛ける。画素値だけを変える
+    /// 調整（明るさなど）は倍率の影響を受けない。
     /// </para>
     /// </remarks>
-    private static Mat Apply(Mat original, ProcessingSettings settings, double previewScale)
+    private static Mat Apply(Mat original, ProcessingSettings settings, RenderContext context)
     {
-        _ = previewScale;
-
         // 元画像には書き込まない。毎回コピーから作り直すので画質劣化が蓄積しない
         var result = original.Clone();
+
+        // 2. リサイズ
+        if (settings.Resize.Enabled)
+        {
+            // 出力寸法は元画像の寸法から決める。倍率からの逆算はしない
+            var (targetWidth, targetHeight) =
+                settings.Resize.ResolveSize(context.OriginalWidth, context.OriginalHeight);
+
+            // プレビューは既に縮小されているので、出力寸法に現在の倍率を掛けたところまで縮める。
+            // 書き出し時は倍率が 1.0 なので、出力寸法そのものになる
+            var width = Math.Max(1, (int)Math.Round(targetWidth * context.PreviewScale));
+            var height = Math.Max(1, (int)Math.Round(targetHeight * context.PreviewScale));
+
+            if (width != result.Width || height != result.Height)
+            {
+                var resized = new Mat();
+
+                // 拡大はしないと決めているため、縮小に最も適した Area で固定する
+                Cv2.Resize(result, resized, new Size(width, height), interpolation: InterpolationFlags.Area);
+                result.Dispose();
+                result = resized;
+            }
+        }
 
         // 3. 明るさ
         if (settings.Brightness.Enabled && settings.Brightness.Value != 0)

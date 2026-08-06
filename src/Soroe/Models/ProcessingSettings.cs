@@ -22,6 +22,7 @@ public sealed class ProcessingSettings
     {
         // 各項目の変更をこのクラスの 1 本のイベントにまとめる。
         // 購読側（ViewModel）が項目ごとに購読し直さずに済む。
+        Resize.PropertyChanged += OnOptionChanged;
         Brightness.PropertyChanged += OnOptionChanged;
     }
 
@@ -34,6 +35,9 @@ public sealed class ProcessingSettings
     /// 設定の版。項目を変更したときに、古いプリセットを分岐処理するために使う。
     /// </summary>
     public int SchemaVersion { get; set; } = 1;
+
+    /// <summary>リサイズ（適用順序 2 番目）。</summary>
+    public ResizeOption Resize { get; } = new();
 
     /// <summary>明るさ（適用順序 3 番目）。</summary>
     public BrightnessOption Brightness { get; } = new();
@@ -49,6 +53,11 @@ public sealed class ProcessingSettings
     public ProcessingSettings Clone() => new()
     {
         SchemaVersion = SchemaVersion,
+        Resize =
+        {
+            Enabled = Resize.Enabled,
+            LongestEdge = Resize.LongestEdge,
+        },
         Brightness =
         {
             Enabled = Brightness.Enabled,

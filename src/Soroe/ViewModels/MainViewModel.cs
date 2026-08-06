@@ -78,7 +78,13 @@ public sealed partial class MainViewModel : ObservableObject
         };
 
         // 調整値が変わったらプレビューを作り直す。元画像は読み直さない
-        Settings.Changed += (_, _) => _ = UpdatePreviewAsync(reloadSource: false);
+        Settings.Changed += (_, _) =>
+        {
+            UpdatePreviewSizeText();
+            _ = UpdatePreviewAsync(reloadSource: false);
+        };
+
+        SyncResizePresetFromSettings();
 
         Output.PropertyChanged += (_, _) =>
         {
@@ -119,6 +125,38 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>画面下部に出す状態表示。</summary>
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = "画像ファイルまたはフォルダをドロップしてください";
+
+    /// <summary>
+    /// 選択中の 1 枚の寸法。リサイズで変わる場合は変化後も並べて出す。
+    /// </summary>
+    /// <remarks>
+    /// プレビューは枠に合わせて表示されるため、長辺 1920 でも 800 でも見た目がほとんど
+    /// 変わらない。リサイズだけは視覚的な手応えが得られない項目なので、数値で示す。
+    /// </remarks>
+    [ObservableProperty]
+    public partial string PreviewSizeText { get; set; } = string.Empty;
+
+    /// <summary>リサイズのドロップダウンに並べる候補。</summary>
+    public IReadOnlyList<ResizePreset> ResizePresets { get; } =
+    [
+        new(1920, "1920（フルHD・ブログ向け）"),
+        new(1280, "1280（メール添付向け）"),
+        new(800, "800（SNS向け）"),
+        new(null, "自由入力"),
+    ];
+
+    /// <summary>ドロップダウンで選ばれている候補。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsResizeFreeInput))]
+    public partial ResizePreset? SelectedResizePreset { get; set; }
+
+    /// <summary>自由入力が選ばれているかどうか。数値入力欄の表示切り替えに使う。</summary>
+    /// <remarks>
+    /// 「候補を選んだ状態」か「自由入力でたまたま同じ値を打った状態」かは設定値からは
+    /// 区別できないため、ここだけは ViewModel が持つ。ただしこれは入力方法の選択であって
+    /// 設定値ではないので、プリセットの保存対象にはしない。
+    /// </remarks>
+    public bool IsResizeFreeInput => SelectedResizePreset is { LongestEdge: null };
 
     /// <summary>書き出しの設定。</summary>
     public ExportSettings Output { get; } = new();
@@ -319,6 +357,53 @@ public sealed partial class MainViewModel : ObservableObject
         return text;
     }
 
+    partial void OnSelectedResizePresetChanged(ResizePreset? value)
+    {
+        // 自由入力へ切り替えたときは値を変えない。直前に選んでいた候補の値を
+        // そのまま引き継ぎ、そこから微調整できるようにする
+        if (value?.LongestEdge is int longestEdge)
+        {
+            Settings.Resize.LongestEdge = longestEdge;
+        }
+    }
+
+    /// <summary>
+    /// 設定値からドロップダウンの選択を導き直す。
+    /// </summary>
+    /// <remarks>
+    /// 選択モードは設定として保存しないため、復元時はここで導出する。
+    /// 復元された値が候補のいずれかと一致すればその候補を選び、
+    /// 一致しなければ自由入力として扱う。
+    /// <b>プリセットを読み込んだ後は必ず呼ぶこと。</b>呼ばないと
+    /// 「値は 1000 なのにドロップダウンは 1920」といった食い違いが起きる。
+    /// </remarks>
+    public void SyncResizePresetFromSettings()
+    {
+        SelectedResizePreset =
+            ResizePresets.FirstOrDefault(p => p.LongestEdge == Settings.Resize.LongestEdge)
+            ?? ResizePresets.First(p => p.LongestEdge is null);
+    }
+
+    /// <summary>
+    /// 選択中の 1 枚について、元の寸法と出力寸法の表示を作り直す。
+    /// </summary>
+    private void UpdatePreviewSizeText()
+    {
+        var source = _previewSource;
+        if (source is null)
+        {
+            PreviewSizeText = string.Empty;
+            return;
+        }
+
+        var (width, height) = Settings.Resize.ResolveSize(source.OriginalWidth, source.OriginalHeight);
+        var original = $"{source.OriginalWidth} × {source.OriginalHeight}";
+
+        PreviewSizeText = width == source.OriginalWidth && height == source.OriginalHeight
+            ? original
+            : $"{original}  →  {width} × {height}";
+    }
+
     /// <summary>
     /// 実行ボタンの上に出す 1 行を作り直す。
     /// </summary>
@@ -488,8 +573,11 @@ public sealed partial class MainViewModel : ObservableObject
             if (source is null)
             {
                 PreviewImage = null;
+                PreviewSizeText = string.Empty;
                 return;
             }
+
+            UpdatePreviewSizeText();
 
             // バックグラウンドで処理している間に UI 側の値が変わっても影響しないよう、
             // 開始時点の値を写してから渡す
@@ -507,7 +595,8 @@ public sealed partial class MainViewModel : ObservableObject
 
             if (item is not null)
             {
-                StatusMessage = $"{item.FileName}（{source.OriginalWidth} × {source.OriginalHeight}）";
+                // 寸法は PreviewSizeText が受け持つので、ここではファイル名だけにする
+                StatusMessage = item.FileName;
             }
         }
         catch (Exception ex)

@@ -144,6 +144,11 @@
                         BorderThickness="1"
                         CornerRadius="8">
                     <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
                         <Image Source="{Binding PreviewImage}"
                                Stretch="Uniform"
                                StretchDirection="DownOnly"
@@ -165,6 +170,16 @@
                                 </Style>
                             </TextBlock.Style>
                         </TextBlock>
+
+                        <!--
+                            プレビューは枠に合わせて表示されるため、リサイズしても見た目が
+                            ほとんど変わらない。効果が分かるよう寸法を数値で示す。
+                        -->
+                        <TextBlock Grid.Row="1"
+                                   Text="{Binding PreviewSizeText}"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,10"
+                                   Opacity="0.75" />
                     </Grid>
                 </Border>
 
@@ -195,6 +210,69 @@
                             残りの分類は、この StackPanel と同じ形（見出し + 項目行）を
                             この前後に足す。現在は 2 のうち明るさのみ実装している。
                         -->
+                        <TextBlock Text="キャンバスを変える" Style="{StaticResource SectionHeaderStyle}" />
+
+                        <Grid Style="{StaticResource AdjustmentRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <CheckBox Grid.Column="0"
+                                      Content="リサイズ"
+                                      MinWidth="92"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.Resize.Enabled}" />
+
+                            <TextBlock Grid.Column="1"
+                                       Text="長辺を"
+                                       Margin="8,0,6,0"
+                                       VerticalAlignment="Center" />
+
+                            <!-- よく使う値を用途つきで並べる。自由入力もここから選ぶ -->
+                            <ComboBox Grid.Column="2"
+                                      MinWidth="196"
+                                      VerticalAlignment="Center"
+                                      ItemsSource="{Binding ResizePresets}"
+                                      DisplayMemberPath="Label"
+                                      SelectedItem="{Binding SelectedResizePreset}"
+                                      IsEnabled="{Binding Settings.Resize.Enabled}" />
+
+                            <controls:NumericSpinner Grid.Column="3"
+                                                     Margin="8,0,0,0"
+                                                     VerticalAlignment="Center"
+                                                     Minimum="{x:Static models:ResizeOption.MinValue}"
+                                                     Maximum="{x:Static models:ResizeOption.MaxValue}"
+                                                     Step="10"
+                                                     Value="{Binding Settings.Resize.LongestEdge}"
+                                                     IsEnabled="{Binding Settings.Resize.Enabled}">
+                                <controls:NumericSpinner.Style>
+                                    <Style TargetType="controls:NumericSpinner">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <!-- 自由入力を選んだときだけ出す。常に両方出すと入力先が二つに見える -->
+                                            <DataTrigger Binding="{Binding IsResizeFreeInput}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </controls:NumericSpinner.Style>
+                            </controls:NumericSpinner>
+
+                            <TextBlock Grid.Column="4"
+                                       Text="px 以内にする"
+                                       Margin="6,0,0,0"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+
+                        <TextBlock Text="指定より小さい画像はそのまま"
+                                   Margin="92,0,0,12"
+                                   FontSize="11"
+                                   Opacity="0.6" />
+
                         <TextBlock Text="画素値を変える" Style="{StaticResource SectionHeaderStyle}" />
 
                         <Grid Style="{StaticResource AdjustmentRowStyle}">
