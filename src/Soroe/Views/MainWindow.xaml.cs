@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -13,9 +14,54 @@ public partial class MainWindow : Window
     /// <summary>
     /// <see cref="MainWindow" /> の新しいインスタンスを生成する。
     /// </summary>
+    /// <summary>閉じる操作を受けて、書き出しの終了を待っている最中かどうか。</summary>
+    private bool _waitingForExportToStop;
+
+    /// <summary>
+    /// <see cref="MainWindow" /> の新しいインスタンスを生成する。
+    /// </summary>
     public MainWindow()
     {
         InitializeComponent();
+    }
+
+    /// <summary>
+    /// 書き出しの最中に閉じられた場合、中止してから閉じる。
+    /// </summary>
+    /// <remarks>
+    /// そのまま閉じるとプロセスが終了し、書き込み中の一時ファイルを片付ける処理が
+    /// 走らないまま残ってしまう。中止を要求して、処理中の 1 枚が終わるのを待ってから閉じる。
+    /// 待ち時間は長くても 1 枚分である。
+    /// </remarks>
+    private void OnClosing(object sender, CancelEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel || !viewModel.IsExporting)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+
+        if (_waitingForExportToStop)
+        {
+            return;
+        }
+
+        _waitingForExportToStop = true;
+        viewModel.CancelExportCommand.Execute(null);
+        viewModel.PropertyChanged += OnViewModelPropertyChangedWhileClosing;
+    }
+
+    private void OnViewModelPropertyChangedWhileClosing(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MainViewModel.IsExporting)
+            || sender is not MainViewModel { IsExporting: false } viewModel)
+        {
+            return;
+        }
+
+        viewModel.PropertyChanged -= OnViewModelPropertyChangedWhileClosing;
+        Close();
     }
 
     /// <summary>

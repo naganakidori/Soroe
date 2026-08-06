@@ -128,11 +128,18 @@ public sealed partial class MainViewModel : ObservableObject
     public partial string OutputPathPreview { get; set; } = string.Empty;
 
     /// <summary>書き出しの実行中かどうか。</summary>
+    /// <remarks>
+    /// 書き出し中に無効化するコントロールは、ここに漏れなく並べること。
+    /// 対象は「処理対象と設定を変えてしまう操作」すべて。
+    /// ファイルリストの選択だけは有効のままにしている（開始時点の設定で処理するため
+    /// 結果に影響せず、待っている間にプレビューを見られるほうが親切なため）。
+    /// </remarks>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RunExportCommand))]
     [NotifyCanExecuteChangedFor(nameof(ClearCommand))]
     [NotifyCanExecuteChangedFor(nameof(AddFolderCommand))]
     [NotifyCanExecuteChangedFor(nameof(AddPathsCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SelectOutputFolderCommand))]
     public partial bool IsExporting { get; set; }
 
     /// <summary>書き出しが終わった枚数。</summary>
@@ -253,6 +260,13 @@ public sealed partial class MainViewModel : ObservableObject
             foreach (var failure in result.Failures)
             {
                 ExportFailures.Add($"{Path.GetFileName(failure.SourcePath)} — {failure.Message}");
+            }
+
+            // 進捗の通知は SynchronizationContext 越しに届くため、最後の 1 通が
+            // ここより後になる可能性がある。最後まで進んだことを確実に見せる
+            if (!result.Canceled && result.AbortReason is null)
+            {
+                ExportCompleted = ExportTotal;
             }
 
             StatusMessage = Describe(result);
