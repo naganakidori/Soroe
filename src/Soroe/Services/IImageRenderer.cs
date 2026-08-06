@@ -36,5 +36,30 @@ public interface IImageRenderer
     /// この倍率で打ち消してから適用する。
     /// </param>
     /// <returns>凍結済みのビットマップ。そのまま UI にバインドできる。</returns>
+    /// <remarks>
+    /// 表示専用。ファイルに書き出すときは <see cref="Encode" /> を使うこと。
+    /// <see cref="BitmapSource" /> から書き出すと WPF のエンコーダーを通ることになり、
+    /// 形式ごとの品質設定が効かない。
+    /// </remarks>
     BitmapSource Render(RenderSource source, ProcessingSettings settings, double previewScale);
+
+    /// <summary>
+    /// 元画像に設定を適用した結果を、指定した形式のバイト列にエンコードする。
+    /// </summary>
+    /// <param name="source">元になる画像。この中身は変更しない。</param>
+    /// <param name="settings">適用する設定。</param>
+    /// <param name="previewScale">
+    /// <paramref name="source" /> が元画像に対して何倍かを表す値。書き出しでは原寸で
+    /// 読み込むため 1.0 になる。
+    /// </param>
+    /// <param name="encode">エンコードの設定。</param>
+    /// <returns>そのままファイルに書けるバイト列。</returns>
+    /// <remarks>
+    /// <b><see cref="Render" /> と同じ適用処理を共有している。</b>
+    /// 同じ設定・同じ倍率を渡せば、この結果をデコードしたものは
+    /// <see cref="Render" /> の結果と画素単位で一致する（非可逆な形式を除く）。
+    /// 「プレビューで見たとおりに出力される」ことがこのアプリの根幹なので、
+    /// 適用処理を 2 つに分けてはいけない。
+    /// </remarks>
+    byte[] Encode(RenderSource source, ProcessingSettings settings, double previewScale, EncodeSettings encode);
 }

@@ -31,7 +31,10 @@ public sealed partial class MainViewModel : ObservableObject
         new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".bmp", ".webp" };
 
     private readonly IImageRenderer _renderer;
+    private readonly IImageExporter _exporter;
     private readonly IFolderPicker _folderPicker;
+
+    private CancellationTokenSource? _exportCancellation;
 
     /// <summary>
     /// 追加済みの絶対パス。同じフォルダを 2 回追加しても二重処理しないために持つ。
@@ -58,17 +61,32 @@ public sealed partial class MainViewModel : ObservableObject
     /// <see cref="MainViewModel" /> の新しいインスタンスを生成する。
     /// </summary>
     /// <param name="renderer">画像の読み込みと加工に使う実装。</param>
+    /// <param name="exporter">書き出しに使う実装。</param>
     /// <param name="folderPicker">フォルダ選択ダイアログの実装。</param>
-    public MainViewModel(IImageRenderer renderer, IFolderPicker folderPicker)
+    public MainViewModel(IImageRenderer renderer, IImageExporter exporter, IFolderPicker folderPicker)
     {
         _renderer = renderer;
+        _exporter = exporter;
         _folderPicker = folderPicker;
 
-        // 件数が変わるとクリアボタンの有効・無効も変わる
-        Files.CollectionChanged += (_, _) => ClearCommand.NotifyCanExecuteChanged();
+        // 件数が変わるとボタンの有効・無効と出力先の表示が変わる
+        Files.CollectionChanged += (_, _) =>
+        {
+            ClearCommand.NotifyCanExecuteChanged();
+            RunExportCommand.NotifyCanExecuteChanged();
+            UpdateOutputPreview();
+        };
 
         // 調整値が変わったらプレビューを作り直す。元画像は読み直さない
         Settings.Changed += (_, _) => _ = UpdatePreviewAsync(reloadSource: false);
+
+        Output.PropertyChanged += (_, _) =>
+        {
+            RunExportCommand.NotifyCanExecuteChanged();
+            UpdateOutputPreview();
+        };
+
+        UpdateOutputPreview();
     }
 
     /// <summary>
@@ -102,11 +120,44 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = "画像ファイルまたはフォルダをドロップしてください";
 
+    /// <summary>書き出しの設定。</summary>
+    public ExportSettings Output { get; } = new();
+
+    /// <summary>実行ボタンの上に出す、出力先の 1 行表示。</summary>
+    [ObservableProperty]
+    public partial string OutputPathPreview { get; set; } = string.Empty;
+
+    /// <summary>書き出しの実行中かどうか。</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RunExportCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ClearCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AddFolderCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AddPathsCommand))]
+    public partial bool IsExporting { get; set; }
+
+    /// <summary>書き出しが終わった枚数。</summary>
+    [ObservableProperty]
+    public partial int ExportCompleted { get; set; }
+
+    /// <summary>書き出す総枚数。</summary>
+    [ObservableProperty]
+    public partial int ExportTotal { get; set; }
+
+    /// <summary>いま書き出しているファイル名。</summary>
+    [ObservableProperty]
+    public partial string ExportingFileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 直前の書き出しで失敗したファイルの一覧。
+    /// </summary>
+    /// <remarks>1 枚の失敗で全体を止めないため、終わってからまとめて見せる。</remarks>
+    public ObservableCollection<string> ExportFailures { get; } = [];
+
     /// <summary>
     /// ドロップされたファイル・フォルダをリストに追加する。
     /// </summary>
     /// <param name="paths">ドロップされたパス。</param>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditList))]
     private void AddPaths(IReadOnlyList<string>? paths)
     {
         if (paths is null)
@@ -120,7 +171,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>
     /// フォルダを選ばせ、その直下の画像をリストに追加する。
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanEditList))]
     private void AddFolder()
     {
         var folder = _folderPicker.Pick();
@@ -146,7 +197,143 @@ public sealed partial class MainViewModel : ObservableObject
         StatusMessage = "画像ファイルまたはフォルダをドロップしてください";
     }
 
-    private bool CanClear() => Files.Count > 0;
+    private bool CanClear() => Files.Count > 0 && !IsExporting;
+
+    /// <summary>書き出し中はリストを触らせない。処理対象が途中で変わると結果が読めなくなるため。</summary>
+    private bool CanEditList() => !IsExporting;
+
+    /// <summary>
+    /// 出力先フォルダを選ばせる。
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanEditList))]
+    private void SelectOutputFolder()
+    {
+        var folder = _folderPicker.Pick();
+        if (folder is not null)
+        {
+            Output.Folder = folder;
+        }
+    }
+
+    /// <summary>
+    /// リストの全件を書き出す。
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRunExport))]
+    private async Task RunExportAsync()
+    {
+        // 処理中に画面側が変わっても影響しないよう、開始時点の値を写して渡す
+        var paths = Files.Select(f => f.FullPath).ToArray();
+        var exportSettings = new ExportSettings { Folder = Output.Folder };
+        var processing = Settings.Clone();
+
+        ExportFailures.Clear();
+        ExportCompleted = 0;
+        ExportTotal = paths.Length;
+        ExportingFileName = string.Empty;
+        IsExporting = true;
+
+        // Progress<T> は生成時の SynchronizationContext を捕まえるため、
+        // コールバックは UI スレッドで呼ばれる。ここで作ることに意味がある
+        var progress = new Progress<ExportProgress>(p =>
+        {
+            ExportCompleted = p.Completed;
+            ExportTotal = p.Total;
+            ExportingFileName = p.CurrentFileName;
+        });
+
+        using var cancellation = new CancellationTokenSource();
+        _exportCancellation = cancellation;
+
+        try
+        {
+            var result = await Task.Run(
+                () => _exporter.Export(paths, exportSettings, processing, progress, cancellation.Token))
+                .ConfigureAwait(true);
+
+            foreach (var failure in result.Failures)
+            {
+                ExportFailures.Add($"{Path.GetFileName(failure.SourcePath)} — {failure.Message}");
+            }
+
+            StatusMessage = Describe(result);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"書き出しに失敗しました（{ex.Message}）";
+        }
+        finally
+        {
+            _exportCancellation = null;
+            IsExporting = false;
+            ExportingFileName = string.Empty;
+        }
+    }
+
+    private bool CanRunExport()
+        => !IsExporting && Files.Count > 0 && !string.IsNullOrWhiteSpace(Output.Folder);
+
+    /// <summary>
+    /// 実行中の書き出しを中止する。
+    /// </summary>
+    [RelayCommand]
+    private void CancelExport() => _exportCancellation?.Cancel();
+
+    /// <summary>
+    /// 結果を 1 行の文にする。
+    /// </summary>
+    private static string Describe(ExportResult result)
+    {
+        if (result.AbortReason is not null)
+        {
+            return result.AbortReason;
+        }
+
+        var text = result.Canceled
+            ? $"中止しました（{result.Exported} 件を書き出し済み）"
+            : $"{result.Exported} 件を書き出しました";
+
+        if (result.SkippedSameAsSource > 0)
+        {
+            text += $"。{result.SkippedSameAsSource} 件は出力先が元ファイルと同じためスキップ";
+        }
+
+        if (result.Failures.Count > 0)
+        {
+            text += $"。{result.Failures.Count} 件は失敗";
+        }
+
+        return text;
+    }
+
+    /// <summary>
+    /// 実行ボタンの上に出す 1 行を作り直す。
+    /// </summary>
+    private void UpdateOutputPreview()
+    {
+        if (string.IsNullOrWhiteSpace(Output.Folder))
+        {
+            OutputPathPreview = "出力先を選んでください";
+            return;
+        }
+
+        var first = Files.FirstOrDefault();
+        if (first is null)
+        {
+            OutputPathPreview = "処理する画像がありません";
+            return;
+        }
+
+        try
+        {
+            // 実際に使う判定と同じ経路で求めるので、連番が付く場合はその名前が出る
+            var path = _exporter.ResolveOutputPath(first.FullPath, Output);
+            OutputPathPreview = $"{path}（{Files.Count} 件を処理）";
+        }
+        catch (Exception ex)
+        {
+            OutputPathPreview = $"出力先を確認してください（{ex.Message}）";
+        }
+    }
 
     /// <summary>
     /// 対象拡張子のものだけを、重複を除いて追加する。

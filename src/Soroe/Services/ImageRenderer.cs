@@ -63,6 +63,7 @@ public sealed class ImageRenderer : IImageRenderer
     /// <inheritdoc />
     public BitmapSource Render(RenderSource source, ProcessingSettings settings, double previewScale)
     {
+        // 適用処理は Encode と共有する。ここで独自に加工を足さないこと
         using var result = Apply(source.Image, settings, previewScale);
 
         var bitmap = result.ToWriteableBitmap();
@@ -73,13 +74,32 @@ public sealed class ImageRenderer : IImageRenderer
         return bitmap;
     }
 
+    /// <inheritdoc />
+    public byte[] Encode(RenderSource source, ProcessingSettings settings, double previewScale, EncodeSettings encode)
+    {
+        // 適用処理は Render と共有する。ここで独自に加工を足さないこと。
+        // 分けた瞬間に「プレビューと出力が違う」という最悪の不具合が生まれる
+        using var result = Apply(source.Image, settings, previewScale);
+
+        // Cv2.ImWrite は使わない。ImRead と同じくファイル名を ANSI でネイティブへ渡すため、
+        // CP932 外の文字を含む出力パスで例外になり、一括処理が中断する。
+        // エンコードだけ行い、ファイルへの書き込みは .NET 側で行う
+        Cv2.ImEncode(encode.Extension, result, out var bytes);
+        return bytes;
+    }
+
     /// <summary>
     /// 設定を固定順で適用した結果を新しい <see cref="Mat" /> として返す。
     /// </summary>
     /// <remarks>
+    /// <b>プレビュー（<see cref="Render" />）と書き出し（<see cref="Encode" />）は、
+    /// どちらも必ずこのメソッドを通す。</b>「見たとおりに出る」ことがこのアプリの
+    /// 存在意義なので、経路ごとに加工を書いてはいけない。
+    /// <para>
     /// 適用順序は次で固定する（CLAUDE.md「適用順序は固定」）。
     /// 1. 回転 / 2. リサイズ / 3. 明るさ・コントラスト / 4. 彩度 / 5. グレースケール /
     /// 6. 二値化 / 7. シャープ / 8. 枠線。
+    /// </para>
     /// <para>
     /// 現時点で実装しているのは 3. の明るさのみ。残りはこのメソッドに順番どおり挿入していく。
     /// </para>

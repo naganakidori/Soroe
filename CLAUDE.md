@@ -36,6 +36,10 @@ GIMP や Photoshop のような多機能ソフトは「起動しても何をど�
 - **`Cv2.ImRead` は使わない。** ファイル名を ANSI でネイティブへ渡すため、
   CP932 外の文字を含むパスで ArgumentException が発生し、一括処理が
   中断する。`File.ReadAllBytes` + `Cv2.ImDecode` を使うこと
+- **`Cv2.ImWrite` も使わない。** 読み込みと同じ理由で、CP932 外の文字を含む
+  出力パスで失敗する。`Cv2.ImEncode` + `File.WriteAllBytes` を使うこと。
+  なお書き込みは**一時ファイル名で行い、完了後に `File.Move` で改名する**。
+  中断や失敗で中途半端なファイルを残さないため（原則 2 に直結する）
 - **`ImDecode` は Exif の Orientation を適用済みで読み込む**（検証済み。
   ImRead と寸法・回転方向とも一致）。自前で回転補正を加えると二重に回るので、
   絶対に追加しないこと。回さずに読みたい場合は

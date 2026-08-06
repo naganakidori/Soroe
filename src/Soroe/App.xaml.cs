@@ -17,9 +17,10 @@ public partial class App : Application
 
         // StartupUri ではなくここで組み立てるのは、ViewModel に依存（IImageLoader）を注入するため。
         // DI コンテナを導入するほどの規模ではないので、実装の差し替え口だけを用意しておく。
+        var renderer = new ImageRenderer();
         var window = new MainWindow
         {
-            DataContext = new MainViewModel(new ImageRenderer(), new FolderPicker()),
+            DataContext = new MainViewModel(renderer, new ImageExporter(renderer), new FolderPicker()),
         };
         window.Show();
     }
