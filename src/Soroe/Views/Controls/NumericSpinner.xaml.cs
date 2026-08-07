@@ -88,6 +88,12 @@ public partial class NumericSpinner : UserControl
     private static void OnRangeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         => d.CoerceValue(ValueProperty);
 
+    /// <summary>
+    /// 入力欄の内容が、確定している値と食い違っているかどうか。
+    /// </summary>
+    /// <remarks>打ちかけの入力があるかの判定に使う。</remarks>
+    private bool HasPendingEdit => ValueText.Text != Value.ToString(CultureInfo.InvariantCulture);
+
     private void UpdateText()
     {
         var text = Value.ToString(CultureInfo.InvariantCulture);
@@ -151,12 +157,26 @@ public partial class NumericSpinner : UserControl
         switch (e.Key)
         {
             case Key.Enter:
+                // 打ちかけの入力があるときだけ確定させ、キーを消費する。
+                // 確定済みなら親へ通す。そうしないとダイアログの既定ボタン（実行）に
+                // 永久に届かず、品質を打った直後に Enter で実行できなくなる
+                if (!HasPendingEdit)
+                {
+                    break;
+                }
+
                 Commit();
                 ValueText.SelectAll();
                 e.Handled = true;
                 break;
 
             case Key.Escape:
+                // 取り消すものが無ければ親へ通す。ダイアログの「閉じる」に届かせるため
+                if (!HasPendingEdit)
+                {
+                    break;
+                }
+
                 // 入力を捨てて現在値の表示に戻す
                 UpdateText();
                 ValueText.SelectAll();
