@@ -10,9 +10,9 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:ExportDialogViewModel}"
         Title="書き出し"
-        Height="420"
+        Height="370"
         Width="600"
-        MinHeight="380"
+        MinHeight="360"
         MinWidth="520"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
@@ -33,6 +33,8 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <!-- 失敗一覧。出たときだけ場所を取り、余りをここが受け取る -->
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -116,10 +118,14 @@
                    FontSize="11"
                    Opacity="0.6" />
 
-        <!-- 実行前の最後の確認と、実行後の結果。設定・実行・進捗・結果をこの窓で完結させる -->
+        <!--
+            実行前の最後の確認と、実行後の結果。設定・実行・進捗・結果をこの窓で完結させる。
+            このブロックは内容ぶんだけの高さにする。余りは下の失敗一覧が受け取る。
+        -->
         <Border Grid.Row="3"
                 Margin="0,14,0,0"
                 Padding="12,10"
+                VerticalAlignment="Top"
                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
@@ -129,7 +135,6 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0"
@@ -225,74 +230,92 @@
                     </TextBlock.Style>
                 </TextBlock>
 
-                <!-- 失敗したファイルは、処理が終わってからまとめて出す -->
-                <Grid Grid.Row="3" Margin="0,10,0,0">
-                    <Grid.Style>
-                        <Style TargetType="Grid">
-                            <Setter Property="Visibility" Value="Visible" />
+            </Grid>
+        </Border>
+
+        <!--
+            失敗一覧だけを伸縮する行に置く。大半の実行では失敗が無いので、
+            常に空き領域を予約しておくと無駄になる。
+        -->
+        <Grid Grid.Row="4" Margin="0,10,0,0" MinHeight="100">
+            <Grid.Style>
+                <Style TargetType="Grid">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding ExportFailures.Count}" Value="0">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl ItemsSource="{Binding ExportFailures}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}"
+                                       TextTrimming="CharacterEllipsis"
+                                       Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <!-- 画面には日本語の要約しか出さないので、原文はここから取り出せるようにする -->
+            <Button Grid.Row="1"
+                    Content="詳細をコピー"
+                    HorizontalAlignment="Left"
+                    Margin="0,6,0,0"
+                    Padding="10,3"
+                    Click="OnCopyFailures" />
+        </Grid>
+
+        <StackPanel Grid.Row="5"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,14,0,0">
+            <!--
+                「実行」と「キャンセル」は同じ位置で入れ替える。常にボタンは 2 つになり、
+                いま押せる操作だけが見える。
+            -->
+            <Grid>
+                <Button Content="実行"
+                        IsDefault="True"
+                        MinWidth="96"
+                        Padding="16,6"
+                        Command="{Binding RunCommand}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding ExportFailures.Count}" Value="0">
+                                <DataTrigger Binding="{Binding IsExporting}" Value="True">
                                     <Setter Property="Visibility" Value="Collapsed" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
-                    </Grid.Style>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                    </Button.Style>
+                </Button>
 
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                        <ItemsControl ItemsSource="{Binding ExportFailures}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding}"
-                                               TextTrimming="CharacterEllipsis"
-                                               Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-
-                    <!-- 画面には日本語の要約しか出さないので、原文はここから取り出せるようにする -->
-                    <Button Grid.Row="1"
-                            Content="詳細をコピー"
-                            HorizontalAlignment="Left"
-                            Margin="0,6,0,0"
-                            Padding="10,3"
-                            Click="OnCopyFailures" />
-                </Grid>
+                <!-- 本体が触れない間、止める手段はこれだけになる -->
+                <Button Content="キャンセル"
+                        MinWidth="96"
+                        Padding="16,6"
+                        Command="{Binding CancelCommand}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsExporting}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
             </Grid>
-        </Border>
-
-        <StackPanel Grid.Row="4"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right"
-                    Margin="0,14,0,0">
-            <!-- 実行中は無効にして二重実行を防ぐ -->
-            <Button Content="実行"
-                    IsDefault="True"
-                    MinWidth="96"
-                    Padding="16,6"
-                    Command="{Binding RunCommand}" />
-
-            <!-- 本体が触れない間、止める手段はこれだけになる -->
-            <Button Content="キャンセル"
-                    MinWidth="96"
-                    Margin="10,0,0,0"
-                    Padding="16,6"
-                    Command="{Binding CancelCommand}">
-                <Button.Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                        <Setter Property="Visibility" Value="Collapsed" />
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsExporting}" Value="True">
-                                <Setter Property="Visibility" Value="Visible" />
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Button.Style>
-            </Button>
 
             <!-- 破棄ではなく「実行しないで閉じる」。設定はそのまま残る -->
             <Button Content="閉じる"

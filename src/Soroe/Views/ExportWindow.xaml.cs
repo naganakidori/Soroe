@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using Soroe.Common;
@@ -10,8 +11,17 @@ namespace Soroe.Views;
 /// </summary>
 public partial class ExportWindow : Window
 {
+    /// <summary>
+    /// 失敗一覧が出たときに窓へ足す高さ。
+    /// </summary>
+    /// <remarks>3 行ほどと「詳細をコピー」が収まる程度。</remarks>
+    private const double FailureAreaHeight = 140;
+
     /// <summary>閉じる操作を受けて、書き出しの終了を待っている最中かどうか。</summary>
     private bool _waitingForExportToStop;
+
+    /// <summary>既に失敗一覧のぶんだけ広げたかどうか。</summary>
+    private bool _grownForFailures;
 
     /// <summary>
     /// <see cref="ExportWindow" /> の新しいインスタンスを生成する。
@@ -19,6 +29,40 @@ public partial class ExportWindow : Window
     public ExportWindow()
     {
         InitializeComponent();
+        Loaded += OnLoaded;
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ExportDialogViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.ExportFailures.CollectionChanged += OnFailuresChanged;
+
+        // 表示した時点で既に失敗が入っていることもある
+        GrowForFailures();
+    }
+
+    /// <summary>
+    /// 失敗が出たら、その一覧が読める高さまで窓を広げる。
+    /// </summary>
+    /// <remarks>
+    /// 大半の実行では失敗が無いので、初期の高さは失敗なしの状態に合わせてある。
+    /// 出たときだけ広げることで、普段は無駄な余白を作らずに済む。
+    /// </remarks>
+    private void OnFailuresChanged(object? sender, NotifyCollectionChangedEventArgs e) => GrowForFailures();
+
+    private void GrowForFailures()
+    {
+        if (_grownForFailures || DataContext is not ExportDialogViewModel { ExportFailures.Count: > 0 })
+        {
+            return;
+        }
+
+        _grownForFailures = true;
+        Height = Math.Min(Height + FailureAreaHeight, SystemParameters.WorkArea.Height);
     }
 
     /// <summary>
