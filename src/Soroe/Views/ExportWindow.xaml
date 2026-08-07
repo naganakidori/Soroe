@@ -4,18 +4,20 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:Soroe.Views.Controls"
+        xmlns:converters="clr-namespace:Soroe.Views.Converters"
         xmlns:models="clr-namespace:Soroe.Models"
         xmlns:vm="clr-namespace:Soroe.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:ExportDialogViewModel}"
         Title="書き出し"
-        Height="360"
-        Width="560"
-        MinHeight="340"
+        Height="420"
+        Width="600"
+        MinHeight="380"
         MinWidth="520"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResizeWithGrip">
+        ResizeMode="CanResizeWithGrip"
+        Closing="OnClosing">
     <!--
         横に広げられるようにしている。出力パスが長いと 1 行に収まらないため。
         SizeToContent は使わない。WrapPanel の折り返しで高さが動く一方、
@@ -23,6 +25,7 @@
     -->
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <converters:WidthFractionConverter x:Key="WidthFraction" />
     </Window.Resources>
 
     <Grid Margin="16">
@@ -113,30 +116,183 @@
                    FontSize="11"
                    Opacity="0.6" />
 
-        <!-- 実行前の最後の確認。実際に書き出される先をそのまま見せる -->
+        <!-- 実行前の最後の確認と、実行後の結果。設定・実行・進捗・結果をこの窓で完結させる -->
         <Border Grid.Row="3"
                 Margin="0,14,0,0"
                 Padding="12,10"
-                VerticalAlignment="Top"
                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                 BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="6">
-            <TextBlock Text="{Binding OutputPathPreview}"
-                       ToolTip="{Binding OutputPathTooltip}"
-                       TextTrimming="CharacterEllipsis" />
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0"
+                           Text="{Binding OutputPathPreview}"
+                           ToolTip="{Binding OutputPathTooltip}"
+                           TextTrimming="CharacterEllipsis" />
+
+                <!--
+                    件数とファイル名はバーの上に置く。横に並べると文字数でバーの幅が
+                    変わり、進捗が戻ったように見えてしまう。
+                -->
+                <StackPanel Grid.Row="1" Margin="0,10,0,0">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsExporting}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <Grid x:Name="ExportProgressLine" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0" Margin="0,0,10,0">
+                            <Run Text="{Binding ExportCompleted, Mode=OneWay}" />
+                            <Run Text="/" />
+                            <Run Text="{Binding ExportTotal, Mode=OneWay}" />
+                        </TextBlock>
+
+                        <!--
+                            MaxWidth は TextBlock 側に付ける。ColumnDefinition の MaxWidth は
+                            測定を制限しないため、TextTrimming が働かず単に切れてしまう。
+                            固定値にすると窓を広げても省略が解けないので、行の幅に対する割合で決める。
+                        -->
+                        <TextBlock Grid.Column="1"
+                                   MaxWidth="{Binding ActualWidth, ElementName=ExportProgressLine,
+                                              Converter={StaticResource WidthFraction}, ConverterParameter=0.38}"
+                                   Text="{Binding ExportingSourceName}"
+                                   TextTrimming="CharacterEllipsis" />
+
+                        <TextBlock Grid.Column="2" Text="  →  ">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ExportingOutputName}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <TextBlock Grid.Column="3"
+                                   MaxWidth="{Binding ActualWidth, ElementName=ExportProgressLine,
+                                              Converter={StaticResource WidthFraction}, ConverterParameter=0.38}"
+                                   Text="{Binding ExportingOutputName}"
+                                   TextTrimming="CharacterEllipsis" />
+
+                        <TextBlock Grid.Column="4" Text="{Binding ExportingOutputExtension}" />
+                    </Grid>
+
+                    <ProgressBar Height="6"
+                                 Minimum="0"
+                                 Maximum="{Binding ExportTotal}"
+                                 Value="{Binding ExportCompleted, Mode=OneWay}" />
+                </StackPanel>
+
+                <!-- 完了後の結果。閉じるまで残す -->
+                <TextBlock Grid.Row="2"
+                           Margin="0,10,0,0"
+                           TextWrapping="Wrap"
+                           Text="{Binding ResultMessage}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ResultMessage}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
+                <!-- 失敗したファイルは、処理が終わってからまとめて出す -->
+                <Grid Grid.Row="3" Margin="0,10,0,0">
+                    <Grid.Style>
+                        <Style TargetType="Grid">
+                            <Setter Property="Visibility" Value="Visible" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ExportFailures.Count}" Value="0">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Style>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding ExportFailures}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <!-- 画面には日本語の要約しか出さないので、原文はここから取り出せるようにする -->
+                    <Button Grid.Row="1"
+                            Content="詳細をコピー"
+                            HorizontalAlignment="Left"
+                            Margin="0,6,0,0"
+                            Padding="10,3"
+                            Click="OnCopyFailures" />
+                </Grid>
+            </Grid>
         </Border>
 
         <StackPanel Grid.Row="4"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,14,0,0">
+            <!-- 実行中は無効にして二重実行を防ぐ -->
             <Button Content="実行"
                     IsDefault="True"
                     MinWidth="96"
                     Padding="16,6"
-                    IsEnabled="{Binding CanRun}"
-                    Click="OnRun" />
+                    Command="{Binding RunCommand}" />
+
+            <!-- 本体が触れない間、止める手段はこれだけになる -->
+            <Button Content="キャンセル"
+                    MinWidth="96"
+                    Margin="10,0,0,0"
+                    Padding="16,6"
+                    Command="{Binding CancelCommand}">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsExporting}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
 
             <!-- 破棄ではなく「実行しないで閉じる」。設定はそのまま残る -->
             <Button Content="閉じる"

@@ -14,7 +14,7 @@ namespace Soroe.Views;
 public sealed class ExportDialogService : IExportDialog
 {
     /// <inheritdoc />
-    public bool Confirm(ExportDialogViewModel viewModel)
+    public void Show(ExportDialogViewModel viewModel)
     {
         var window = new ExportWindow
         {
@@ -22,6 +22,6 @@ public sealed class ExportDialogService : IExportDialog
             Owner = Application.Current?.MainWindow,
         };
 
-        return window.ShowDialog() == true;
+        window.ShowDialog();
     }
 }

@@ -36,11 +36,6 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IFolderPicker _folderPicker;
     private readonly IExportDialog _exportDialog;
 
-    private CancellationTokenSource? _exportCancellation;
-
-    /// <summary>直前の書き出しで失敗した内容。例外の原文を含む。</summary>
-    private IReadOnlyList<ExportFailure> _lastFailures = [];
-
     /// <summary>
     /// 追加済みの絶対パス。同じフォルダを 2 回追加しても二重処理しないために持つ。
     /// </summary>
@@ -184,57 +179,12 @@ public sealed partial class MainViewModel : ObservableObject
     public partial string OutputPathTooltip { get; set; } = string.Empty;
 
     /// <summary>書き出しの実行中かどうか。</summary>
-    /// <remarks>
-    /// 書き出し中に無効化するコントロールは、ここに漏れなく並べること。
-    /// 対象は「処理対象と設定を変えてしまう操作」すべて。
-    /// ファイルリストの選択だけは有効のままにしている（開始時点の設定で処理するため
-    /// 結果に影響せず、待っている間にプレビューを見られるほうが親切なため）。
-    /// </remarks>
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
-    [NotifyCanExecuteChangedFor(nameof(ClearCommand))]
-    [NotifyCanExecuteChangedFor(nameof(AddFolderCommand))]
-    [NotifyCanExecuteChangedFor(nameof(AddPathsCommand))]
-    public partial bool IsExporting { get; set; }
-
-    /// <summary>書き出しが終わった枚数。</summary>
-    [ObservableProperty]
-    public partial int ExportCompleted { get; set; }
-
-    /// <summary>書き出す総枚数。</summary>
-    [ObservableProperty]
-    public partial int ExportTotal { get; set; }
-
-    /// <summary>いま処理している元ファイルの名前。</summary>
-    [ObservableProperty]
-    public partial string ExportingSourceName { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 書き出し先のファイル名から拡張子を除いた部分。
-    /// </summary>
-    /// <remarks>
-    /// 拡張子を別に分けているのは、長い名前を省略しても拡張子を残すため。
-    /// この表示の主目的は形式の指定が効いているかの確認なので、末尾から削ると
-    /// 一番見たい部分が最初に失われる。
-    /// </remarks>
-    [ObservableProperty]
-    public partial string ExportingOutputName { get; set; } = string.Empty;
-
-    /// <summary>書き出し先のファイル名の拡張子。省略しない。</summary>
-    [ObservableProperty]
-    public partial string ExportingOutputExtension { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 直前の書き出しで失敗したファイルの一覧。
-    /// </summary>
-    /// <remarks>1 枚の失敗で全体を止めないため、終わってからまとめて見せる。</remarks>
-    public ObservableCollection<string> ExportFailures { get; } = [];
 
     /// <summary>
     /// ドロップされたファイル・フォルダをリストに追加する。
     /// </summary>
     /// <param name="paths">ドロップされたパス。</param>
-    [RelayCommand(CanExecute = nameof(CanEditList))]
+    [RelayCommand]
     private void AddPaths(IReadOnlyList<string>? paths)
     {
         if (paths is null)
@@ -248,7 +198,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>
     /// フォルダを選ばせ、その直下の画像をリストに追加する。
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanEditList))]
+    [RelayCommand]
     private void AddFolder()
     {
         var folder = _folderPicker.Pick();
@@ -274,101 +224,36 @@ public sealed partial class MainViewModel : ObservableObject
         StatusMessage = "画像ファイルまたはフォルダをドロップしてください";
     }
 
-    private bool CanClear() => Files.Count > 0 && !IsExporting;
-
-    /// <summary>書き出し中はリストを触らせない。処理対象が途中で変わると結果が読めなくなるため。</summary>
-    private bool CanEditList() => !IsExporting;
+    private bool CanClear() => Files.Count > 0;
 
     /// <summary>
-    /// 書き出しの設定を確認させ、実行が選ばれたら書き出す。
+    /// 書き出しダイアログを開く。
     /// </summary>
     /// <remarks>
     /// ボタンの文言は「書き出し...」。押しても即座には書き出さず、まずダイアログが開く。
     /// 三点リーダーがその意味を表す。
+    /// <para>
+    /// 設定・実行・進捗・結果はすべてダイアログの中で完結する。モーダルなので、
+    /// 書き出し中にこの画面を触れないことが構造的に保証される。
+    /// </para>
     /// </remarks>
     [RelayCommand(CanExecute = nameof(CanExport))]
-    private async Task ExportAsync()
+    private void Export()
     {
-        var paths = Files.Select(f => f.FullPath).ToArray();
-
         // 設定はダイアログが直接書き換える。閉じても値は残る
-        var dialog = new ExportDialogViewModel(Output, paths, _exporter, _folderPicker);
-        if (!_exportDialog.Confirm(dialog))
+        var dialog = new ExportDialogViewModel(
+            Output, Settings, Files.Select(f => f.FullPath).ToArray(), _exporter, _folderPicker);
+
+        _exportDialog.Show(dialog);
+
+        // 何が起きたかの記録を 1 行だけ残す。結果そのものはダイアログで見せている
+        if (dialog.ResultMessage.Length > 0)
         {
-            return;
+            StatusMessage = dialog.ResultMessage;
         }
 
-        // 処理中に画面側が変わっても影響しないよう、開始時点の値を写して渡す
-        var exportSettings = Output.Clone();
-        var processing = Settings.Clone();
-
-        ExportFailures.Clear();
-        ExportCompleted = 0;
-        ExportTotal = paths.Length;
-        ExportingSourceName = string.Empty;
-        ExportingOutputName = string.Empty;
-        ExportingOutputExtension = string.Empty;
-        IsExporting = true;
-
-        // Progress<T> は生成時の SynchronizationContext を捕まえるため、
-        // コールバックは UI スレッドで呼ばれる。ここで作ることに意味がある
-        var progress = new Progress<ExportProgress>(p =>
-        {
-            ExportCompleted = p.Completed;
-            ExportTotal = p.Total;
-            ExportingSourceName = p.SourceFileName;
-
-            if (p.Skipped)
-            {
-                // 一瞬しか出ないうえ、件数は完了時にまとめて報告する。
-                // ここでは「書き出さなかった」ことだけ分かれば十分
-                ExportingOutputName = "スキップ（出力先が元ファイルと同じ）";
-                ExportingOutputExtension = string.Empty;
-                return;
-            }
-
-            ExportingOutputName = Path.GetFileNameWithoutExtension(p.OutputFileName);
-            ExportingOutputExtension = Path.GetExtension(p.OutputFileName);
-        });
-
-        using var cancellation = new CancellationTokenSource();
-        _exportCancellation = cancellation;
-
-        try
-        {
-            var result = await Task.Run(
-                () => _exporter.Export(paths, exportSettings, processing, progress, cancellation.Token))
-                .ConfigureAwait(true);
-
-            // 画面には日本語の要約だけを出す。原文は控えに残し、コピーで取り出せるようにする
-            _lastFailures = result.Failures;
-            foreach (var failure in result.Failures)
-            {
-                ExportFailures.Add($"{Path.GetFileName(failure.SourcePath)} — {failure.Message}");
-            }
-
-            // 進捗の通知は SynchronizationContext 越しに届くため、最後の 1 通が
-            // ここより後になる可能性がある。最後まで進んだことを確実に見せる
-            if (!result.Canceled && result.AbortReason is null)
-            {
-                ExportCompleted = ExportTotal;
-            }
-
-            StatusMessage = Describe(result);
-        }
-        catch (Exception ex)
-        {
-            FileErrorMessage.Log("書き出し", ex);
-            StatusMessage = $"書き出しに失敗しました: {FileErrorMessage.Describe(ex, Output.Folder)}";
-        }
-        finally
-        {
-            _exportCancellation = null;
-            IsExporting = false;
-            ExportingSourceName = string.Empty;
-            ExportingOutputName = string.Empty;
-            ExportingOutputExtension = string.Empty;
-        }
+        // 書き出した結果、同名ファイルが増えて連番の付き方が変わることがある
+        UpdateOutputPreview();
     }
 
     /// <summary>
@@ -379,63 +264,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// 出力先を条件にすると、設定するためのダイアログを開けなくなる。
     /// 出力先が必須であるという判定はダイアログ側の実行ボタンが持つ。
     /// </remarks>
-    private bool CanExport() => !IsExporting && Files.Count > 0;
-
-    /// <summary>
-    /// 失敗の一覧を、例外の原文込みで 1 つの文字列にする。
-    /// </summary>
-    /// <remarks>
-    /// 画面には日本語の要約しか出していないため、不具合の報告に使えるようにここで原文を添える。
-    /// </remarks>
-    public string BuildFailureReport()
-    {
-        var builder = new StringBuilder();
-        builder.AppendLine($"Soroe 書き出しエラー  {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        builder.AppendLine($"{_lastFailures.Count} 件");
-
-        foreach (var failure in _lastFailures)
-        {
-            builder.AppendLine();
-            builder.AppendLine(failure.SourcePath);
-            builder.AppendLine($"  {failure.Message}");
-            builder.AppendLine($"  {failure.Detail}");
-        }
-
-        return builder.ToString();
-    }
-
-    /// <summary>
-    /// 実行中の書き出しを中止する。
-    /// </summary>
-    [RelayCommand]
-    private void CancelExport() => _exportCancellation?.Cancel();
-
-    /// <summary>
-    /// 結果を 1 行の文にする。
-    /// </summary>
-    private static string Describe(ExportResult result)
-    {
-        if (result.AbortReason is not null)
-        {
-            return result.AbortReason;
-        }
-
-        var text = result.Canceled
-            ? $"中止しました（{result.Exported} 件を書き出し済み）"
-            : $"{result.Exported} 件を書き出しました";
-
-        if (result.SkippedSameAsSource > 0)
-        {
-            text += $"。{result.SkippedSameAsSource} 件は出力先が元ファイルと同じためスキップ";
-        }
-
-        if (result.Failures.Count > 0)
-        {
-            text += $"。{result.Failures.Count} 件は失敗";
-        }
-
-        return text;
-    }
+    private bool CanExport() => Files.Count > 0;
 
     partial void OnSelectedResizePresetChanged(ResizePreset? value)
     {
