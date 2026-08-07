@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Text;
 using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -33,8 +34,12 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly IImageRenderer _renderer;
     private readonly IImageExporter _exporter;
     private readonly IFolderPicker _folderPicker;
+    private readonly IExportDialog _exportDialog;
 
     private CancellationTokenSource? _exportCancellation;
+
+    /// <summary>直前の書き出しで失敗した内容。例外の原文を含む。</summary>
+    private IReadOnlyList<ExportFailure> _lastFailures = [];
 
     /// <summary>
     /// 追加済みの絶対パス。同じフォルダを 2 回追加しても二重処理しないために持つ。
@@ -63,17 +68,23 @@ public sealed partial class MainViewModel : ObservableObject
     /// <param name="renderer">画像の読み込みと加工に使う実装。</param>
     /// <param name="exporter">書き出しに使う実装。</param>
     /// <param name="folderPicker">フォルダ選択ダイアログの実装。</param>
-    public MainViewModel(IImageRenderer renderer, IImageExporter exporter, IFolderPicker folderPicker)
+    /// <param name="exportDialog">書き出しの設定・確認ダイアログの実装。</param>
+    public MainViewModel(
+        IImageRenderer renderer,
+        IImageExporter exporter,
+        IFolderPicker folderPicker,
+        IExportDialog exportDialog)
     {
         _renderer = renderer;
         _exporter = exporter;
         _folderPicker = folderPicker;
+        _exportDialog = exportDialog;
 
         // 件数が変わるとボタンの有効・無効と出力先の表示が変わる
         Files.CollectionChanged += (_, _) =>
         {
             ClearCommand.NotifyCanExecuteChanged();
-            RunExportCommand.NotifyCanExecuteChanged();
+            ExportCommand.NotifyCanExecuteChanged();
             UpdateOutputPreview();
         };
 
@@ -86,15 +97,8 @@ public sealed partial class MainViewModel : ObservableObject
 
         SyncResizePresetFromSettings();
 
-        Output.PropertyChanged += (_, _) =>
-        {
-            RunExportCommand.NotifyCanExecuteChanged();
-            UpdateOutputPreview();
-
-            // 形式によって出す品質欄が変わる
-            OnPropertyChanged(nameof(ShowJpegQuality));
-            OnPropertyChanged(nameof(ShowWebPQuality));
-        };
+        // ダイアログ側で設定が変わったときも、サマリ行を追随させる
+        Output.PropertyChanged += (_, _) => UpdateOutputPreview();
 
         UpdateOutputPreview();
     }
@@ -162,32 +166,22 @@ public sealed partial class MainViewModel : ObservableObject
     /// </remarks>
     public bool IsResizeFreeInput => SelectedResizePreset is { LongestEdge: null };
 
-    /// <summary>書き出しの設定。</summary>
+    /// <summary>
+    /// 書き出しの設定。
+    /// </summary>
+    /// <remarks>
+    /// 設定の編集はダイアログが担う。ダイアログはこの実体をそのまま書き換えるので、
+    /// 閉じた後も値が残り、サマリ行も追随する。
+    /// </remarks>
     public ExportSettings Output { get; } = new();
 
-    /// <summary>出力形式のドロップダウンに並べる項目。</summary>
-    public IReadOnlyList<ExportFormatChoice> ExportFormats { get; } =
-    [
-        new(ExportFormat.KeepOriginal, "元の形式を維持"),
-        new(ExportFormat.Jpeg, "JPEG (.jpg)"),
-        new(ExportFormat.Png, "PNG (.png)"),
-        new(ExportFormat.Bmp, "BMP (.bmp)"),
-        new(ExportFormat.WebP, "WebP (.webp)"),
-    ];
-
-    /// <summary>JPEG 品質の欄を出すかどうか。</summary>
-    /// <remarks>
-    /// 「元の形式を維持」のときは入力次第で JPEG にも WebP にもなるため、両方出す。
-    /// 隠すと、実際に効いている設定が見えないことになる。
-    /// </remarks>
-    public bool ShowJpegQuality => Output.Format is ExportFormat.KeepOriginal or ExportFormat.Jpeg;
-
-    /// <summary>WebP 品質の欄を出すかどうか。</summary>
-    public bool ShowWebPQuality => Output.Format is ExportFormat.KeepOriginal or ExportFormat.WebP;
-
-    /// <summary>実行ボタンの上に出す、出力先の 1 行表示。</summary>
+    /// <summary>書き出しボタンの上に出す、出力先の 1 行表示。</summary>
     [ObservableProperty]
     public partial string OutputPathPreview { get; set; } = string.Empty;
+
+    /// <summary>出力先の全体。長くて省略される場合に備えて別に持つ。</summary>
+    [ObservableProperty]
+    public partial string OutputPathTooltip { get; set; } = string.Empty;
 
     /// <summary>書き出しの実行中かどうか。</summary>
     /// <remarks>
@@ -197,11 +191,10 @@ public sealed partial class MainViewModel : ObservableObject
     /// 結果に影響せず、待っている間にプレビューを見られるほうが親切なため）。
     /// </remarks>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(RunExportCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
     [NotifyCanExecuteChangedFor(nameof(ClearCommand))]
     [NotifyCanExecuteChangedFor(nameof(AddFolderCommand))]
     [NotifyCanExecuteChangedFor(nameof(AddPathsCommand))]
-    [NotifyCanExecuteChangedFor(nameof(SelectOutputFolderCommand))]
     public partial bool IsExporting { get; set; }
 
     /// <summary>書き出しが終わった枚数。</summary>
@@ -287,26 +280,25 @@ public sealed partial class MainViewModel : ObservableObject
     private bool CanEditList() => !IsExporting;
 
     /// <summary>
-    /// 出力先フォルダを選ばせる。
+    /// 書き出しの設定を確認させ、実行が選ばれたら書き出す。
     /// </summary>
-    [RelayCommand(CanExecute = nameof(CanEditList))]
-    private void SelectOutputFolder()
+    /// <remarks>
+    /// ボタンの文言は「書き出し...」。押しても即座には書き出さず、まずダイアログが開く。
+    /// 三点リーダーがその意味を表す。
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanExport))]
+    private async Task ExportAsync()
     {
-        var folder = _folderPicker.Pick();
-        if (folder is not null)
-        {
-            Output.Folder = folder;
-        }
-    }
-
-    /// <summary>
-    /// リストの全件を書き出す。
-    /// </summary>
-    [RelayCommand(CanExecute = nameof(CanRunExport))]
-    private async Task RunExportAsync()
-    {
-        // 処理中に画面側が変わっても影響しないよう、開始時点の値を写して渡す
         var paths = Files.Select(f => f.FullPath).ToArray();
+
+        // 設定はダイアログが直接書き換える。閉じても値は残る
+        var dialog = new ExportDialogViewModel(Output, paths, _exporter, _folderPicker);
+        if (!_exportDialog.Confirm(dialog))
+        {
+            return;
+        }
+
+        // 処理中に画面側が変わっても影響しないよう、開始時点の値を写して渡す
         var exportSettings = Output.Clone();
         var processing = Settings.Clone();
 
@@ -348,6 +340,8 @@ public sealed partial class MainViewModel : ObservableObject
                 () => _exporter.Export(paths, exportSettings, processing, progress, cancellation.Token))
                 .ConfigureAwait(true);
 
+            // 画面には日本語の要約だけを出す。原文は控えに残し、コピーで取り出せるようにする
+            _lastFailures = result.Failures;
             foreach (var failure in result.Failures)
             {
                 ExportFailures.Add($"{Path.GetFileName(failure.SourcePath)} — {failure.Message}");
@@ -364,7 +358,8 @@ public sealed partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"書き出しに失敗しました（{ex.Message}）";
+            FileErrorMessage.Log("書き出し", ex);
+            StatusMessage = $"書き出しに失敗しました: {FileErrorMessage.Describe(ex, Output.Folder)}";
         }
         finally
         {
@@ -376,8 +371,38 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    private bool CanRunExport()
-        => !IsExporting && Files.Count > 0 && !string.IsNullOrWhiteSpace(Output.Folder);
+    /// <summary>
+    /// 書き出しダイアログを開ける条件。
+    /// </summary>
+    /// <remarks>
+    /// <b>出力先は条件に入れない。</b>出力先を設定する場所がダイアログの中なので、
+    /// 出力先を条件にすると、設定するためのダイアログを開けなくなる。
+    /// 出力先が必須であるという判定はダイアログ側の実行ボタンが持つ。
+    /// </remarks>
+    private bool CanExport() => !IsExporting && Files.Count > 0;
+
+    /// <summary>
+    /// 失敗の一覧を、例外の原文込みで 1 つの文字列にする。
+    /// </summary>
+    /// <remarks>
+    /// 画面には日本語の要約しか出していないため、不具合の報告に使えるようにここで原文を添える。
+    /// </remarks>
+    public string BuildFailureReport()
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"Soroe 書き出しエラー  {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        builder.AppendLine($"{_lastFailures.Count} 件");
+
+        foreach (var failure in _lastFailures)
+        {
+            builder.AppendLine();
+            builder.AppendLine(failure.SourcePath);
+            builder.AppendLine($"  {failure.Message}");
+            builder.AppendLine($"  {failure.Detail}");
+        }
+
+        return builder.ToString();
+    }
 
     /// <summary>
     /// 実行中の書き出しを中止する。
@@ -464,16 +489,21 @@ public sealed partial class MainViewModel : ObservableObject
     /// </summary>
     private void UpdateOutputPreview()
     {
-        if (string.IsNullOrWhiteSpace(Output.Folder))
-        {
-            OutputPathPreview = "出力先を選んでください";
-            return;
-        }
-
+        // 実行を妨げているものから順に案内する。
+        // 画像が無ければボタン自体が無効なので、まずそちらを促す
         var first = Files.FirstOrDefault();
         if (first is null)
         {
-            OutputPathPreview = "処理する画像がありません";
+            OutputPathPreview = "画像を追加してください";
+            OutputPathTooltip = string.Empty;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Output.Folder))
+        {
+            // 主画面に出力先を選ぶ手段は無い。ボタンは押せる状態なので詰まらない
+            OutputPathPreview = "出力先が未設定です";
+            OutputPathTooltip = string.Empty;
             return;
         }
 
@@ -482,10 +512,13 @@ public sealed partial class MainViewModel : ObservableObject
             // 実際に使う判定と同じ経路で求めるので、連番が付く場合はその名前が出る
             var path = _exporter.ResolveOutputPath(first.FullPath, Output);
             OutputPathPreview = $"{path}（{Files.Count} 件を処理）";
+            OutputPathTooltip = path;
         }
         catch (Exception ex)
         {
-            OutputPathPreview = $"出力先を確認してください（{ex.Message}）";
+            FileErrorMessage.Log("出力先の確認", ex);
+            OutputPathPreview = $"出力先を確認してください: {FileErrorMessage.Describe(ex, Output.Folder)}";
+            OutputPathTooltip = string.Empty;
         }
     }
 

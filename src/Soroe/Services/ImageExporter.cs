@@ -1,4 +1,5 @@
 using System.IO;
+using Soroe.Common;
 using Soroe.Models;
 
 namespace Soroe.Services;
@@ -95,8 +96,11 @@ public sealed class ImageExporter : IImageExporter
             }
             catch (Exception ex)
             {
-                // 1 枚の失敗で全体を止めない。集めて最後にまとめて報告する
-                failures.Add(new ExportFailure(sourcePath, ex.Message));
+                // 1 枚の失敗で全体を止めない。集めて最後にまとめて報告する。
+                // 画面には日本語の要約を出し、原文は控えとデバッグ出力に残す
+                FileErrorMessage.Log($"書き出し失敗 {sourcePath}", ex);
+                failures.Add(new ExportFailure(
+                    sourcePath, FileErrorMessage.Describe(ex, sourcePath), FileErrorMessage.Detail(ex)));
             }
             finally
             {
@@ -121,7 +125,7 @@ public sealed class ImageExporter : IImageExporter
         {
             if (source is null)
             {
-                throw new IOException("画像を読み込めませんでした。");
+                throw new UserMessageException("画像を読み込めませんでした");
             }
 
             // 拡張子は OutputPathResolver が形式に合わせて決めている
@@ -182,7 +186,8 @@ public sealed class ImageExporter : IImageExporter
         }
         catch (Exception ex)
         {
-            return $"出力先に書き込めません: {ex.Message}";
+            FileErrorMessage.Log($"出力先の書き込み確認 {folder}", ex);
+            return $"出力先に書き込めません: {FileErrorMessage.Describe(ex, probePath)}";
         }
     }
 

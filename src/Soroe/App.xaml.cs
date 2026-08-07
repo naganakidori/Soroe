@@ -20,7 +20,8 @@ public partial class App : Application
         var renderer = new ImageRenderer();
         var window = new MainWindow
         {
-            DataContext = new MainViewModel(renderer, new ImageExporter(renderer), new FolderPicker()),
+            DataContext = new MainViewModel(
+                renderer, new ImageExporter(renderer), new FolderPicker(), new ExportDialogService()),
         };
         window.Show();
     }

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using Soroe.Common;
 using Soroe.ViewModels;
 
 namespace Soroe.Views;
@@ -86,6 +87,33 @@ public partial class MainWindow : Window
 
         slider.Value += Math.Sign(e.Delta) * (slider.SmallChange == 0 ? 1 : slider.SmallChange);
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// 失敗の一覧を、例外の原文込みでクリップボードへ写す。
+    /// </summary>
+    /// <remarks>
+    /// 画面には日本語の要約しか出していないため、不具合の報告に使える形をここで用意する。
+    /// クリップボードは View の機能なので、文面の組み立てだけ ViewModel に任せる。
+    /// </remarks>
+    private void OnCopyFailures(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        try
+        {
+            Clipboard.SetText(viewModel.BuildFailureReport());
+            viewModel.StatusMessage = "失敗の詳細をクリップボードにコピーしました";
+        }
+        catch (Exception ex)
+        {
+            // クリップボードは他のプロセスに掴まれていると失敗することがある
+            FileErrorMessage.Log("クリップボードへのコピー", ex);
+            viewModel.StatusMessage = "クリップボードにコピーできませんでした";
+        }
     }
 
     private void OnDragOver(object sender, DragEventArgs e)

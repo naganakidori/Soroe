@@ -1,0 +1,149 @@
+<Window x:Class="Soroe.Views.ExportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="clr-namespace:Soroe.Views.Controls"
+        xmlns:models="clr-namespace:Soroe.Models"
+        xmlns:vm="clr-namespace:Soroe.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:ExportDialogViewModel}"
+        Title="書き出し"
+        Height="360"
+        Width="560"
+        MinHeight="340"
+        MinWidth="520"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip">
+    <!--
+        横に広げられるようにしている。出力パスが長いと 1 行に収まらないため。
+        SizeToContent は使わない。WrapPanel の折り返しで高さが動く一方、
+        縦のリサイズだけ効かないウィンドウになって挙動が不自然になる。
+    -->
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 出力先 -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Text="出力先:" VerticalAlignment="Center" Margin="0,0,8,0" />
+
+            <TextBox Grid.Column="1"
+                     VerticalContentAlignment="Center"
+                     Text="{Binding Output.Folder, UpdateSourceTrigger=PropertyChanged}" />
+
+            <Button Grid.Column="2"
+                    Content="参照"
+                    Margin="8,0,0,0"
+                    Padding="14,4"
+                    Command="{Binding SelectOutputFolderCommand}" />
+        </Grid>
+
+        <!-- 形式と品質。狭いときは折り返す -->
+        <WrapPanel Grid.Row="1" Margin="0,14,0,0">
+            <TextBlock Text="形式:" VerticalAlignment="Center" Margin="0,0,8,4" />
+
+            <ComboBox MinWidth="168"
+                      Margin="0,0,0,4"
+                      VerticalAlignment="Center"
+                      ItemsSource="{Binding ExportFormats}"
+                      DisplayMemberPath="Label"
+                      SelectedValuePath="Format"
+                      SelectedValue="{Binding Output.Format}" />
+
+            <StackPanel Orientation="Horizontal"
+                        Margin="20,0,0,4"
+                        Visibility="{Binding ShowJpegQuality, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="JPEG 品質" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <controls:NumericSpinner VerticalAlignment="Center"
+                                         Minimum="{x:Static models:ExportSettings.MinQuality}"
+                                         Maximum="{x:Static models:ExportSettings.MaxQuality}"
+                                         Step="5"
+                                         Value="{Binding Output.JpegQuality}" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal"
+                        Margin="20,0,0,4"
+                        Visibility="{Binding ShowWebPQuality, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="WebP 品質" VerticalAlignment="Center" Margin="0,0,6,0" />
+
+                <!-- 可逆のときは品質が効かないので触れないようにする -->
+                <controls:NumericSpinner VerticalAlignment="Center"
+                                         Minimum="{x:Static models:ExportSettings.MinWebPQuality}"
+                                         Maximum="{x:Static models:ExportSettings.MaxQuality}"
+                                         Step="5"
+                                         Value="{Binding Output.WebPQuality}">
+                    <controls:NumericSpinner.Style>
+                        <Style TargetType="controls:NumericSpinner">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Output.WebPLossless}" Value="True">
+                                    <Setter Property="IsEnabled" Value="False" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </controls:NumericSpinner.Style>
+                </controls:NumericSpinner>
+
+                <CheckBox Content="可逆（ファイルサイズは大きくなります）"
+                          Margin="10,0,0,0"
+                          VerticalAlignment="Center"
+                          IsChecked="{Binding Output.WebPLossless}" />
+            </StackPanel>
+        </WrapPanel>
+
+        <TextBlock Grid.Row="2"
+                   Text="透過は白で塗り潰されます"
+                   Margin="0,4,0,0"
+                   FontSize="11"
+                   Opacity="0.6" />
+
+        <!-- 実行前の最後の確認。実際に書き出される先をそのまま見せる -->
+        <Border Grid.Row="3"
+                Margin="0,14,0,0"
+                Padding="12,10"
+                VerticalAlignment="Top"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+            <TextBlock Text="{Binding OutputPathPreview}"
+                       ToolTip="{Binding OutputPathTooltip}"
+                       TextTrimming="CharacterEllipsis" />
+        </Border>
+
+        <StackPanel Grid.Row="4"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,14,0,0">
+            <Button Content="実行"
+                    IsDefault="True"
+                    MinWidth="96"
+                    Padding="16,6"
+                    IsEnabled="{Binding CanRun}"
+                    Click="OnRun" />
+
+            <!-- 破棄ではなく「実行しないで閉じる」。設定はそのまま残る -->
+            <Button Content="閉じる"
+                    IsCancel="True"
+                    MinWidth="96"
+                    Margin="10,0,0,0"
+                    Padding="16,6" />
+        </StackPanel>
+    </Grid>
+</Window>

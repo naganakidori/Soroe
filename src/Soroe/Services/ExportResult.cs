@@ -4,8 +4,12 @@ namespace Soroe.Services;
 /// 書き出しに失敗した 1 枚。
 /// </summary>
 /// <param name="SourcePath">元ファイルの絶対パス。</param>
-/// <param name="Message">失敗した理由。</param>
-public sealed record ExportFailure(string SourcePath, string Message);
+/// <param name="Message">画面に出す、日本語の短い理由。</param>
+/// <param name="Detail">
+/// 例外の原文。画面には出さず、失敗一覧をコピーしたときにだけ含める。
+/// 不具合の報告を受けたときに原因を絞るための手掛かり。
+/// </param>
+public sealed record ExportFailure(string SourcePath, string Message, string Detail);
 
 /// <summary>
 /// 書き出しの結果。
