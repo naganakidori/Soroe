@@ -70,10 +70,16 @@ public partial class MainWindow : Window
     /// <remarks>
     /// つまみを狙わずに値を詰めるための補助。既定では Slider はホイールに反応せず、
     /// 親のスクロールに流れてしまうため、ここで受け取って処理する。
+    /// <para>
+    /// <b>フォーカスがある場合だけ値を変える。</b>調整パネルはスクロールするため、
+    /// 通り過ぎただけのホイールで値が変わると、スクロールしたつもりで設定が
+    /// 書き換わったことに気づけない。一括処理の設定が黙って変わるのは実害がある。
+    /// フォーカスが無いときは何もせず、そのままスクロールに流す。
+    /// </para>
     /// </remarks>
     private void OnSliderMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (sender is not Slider slider || !slider.IsEnabled)
+        if (sender is not Slider slider || !slider.IsEnabled || !slider.IsKeyboardFocusWithin)
         {
             return;
         }

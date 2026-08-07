@@ -4,21 +4,23 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:Soroe.Views.Controls"
+        xmlns:converters="clr-namespace:Soroe.Views.Converters"
         xmlns:models="clr-namespace:Soroe.Models"
         xmlns:vm="clr-namespace:Soroe.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="Soroe"
-        Height="640"
+        Height="720"
         Width="1000"
-        MinHeight="400"
-        MinWidth="640"
+        MinHeight="600"
+        MinWidth="720"
         AllowDrop="True"
         DragOver="OnDragOver"
         Drop="OnDrop"
         Closing="OnClosing">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <converters:WidthFractionConverter x:Key="WidthFraction" />
 
         <!-- 調整パネルの分類見出し。3 分類で共通に使う -->
         <Style x:Key="SectionHeaderStyle" TargetType="TextBlock">
@@ -223,37 +225,26 @@
                         -->
                         <TextBlock Text="キャンバスを変える" Style="{StaticResource SectionHeaderStyle}" />
 
-                        <Grid Style="{StaticResource AdjustmentRowStyle}">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-
-                            <CheckBox Grid.Column="0"
-                                      Content="リサイズ"
+                        <!-- 窓が狭いときは折り返す。横一列に固定すると右端が切れて読めなくなる -->
+                        <WrapPanel Margin="0,0,0,4">
+                            <CheckBox Content="リサイズ"
                                       MinWidth="92"
                                       VerticalAlignment="Center"
                                       IsChecked="{Binding Settings.Resize.Enabled}" />
 
-                            <TextBlock Grid.Column="1"
-                                       Text="長辺を"
+                            <TextBlock Text="長辺を"
                                        Margin="8,0,6,0"
                                        VerticalAlignment="Center" />
 
                             <!-- よく使う値を用途つきで並べる。自由入力もここから選ぶ -->
-                            <ComboBox Grid.Column="2"
-                                      MinWidth="196"
+                            <ComboBox MinWidth="196"
                                       VerticalAlignment="Center"
                                       ItemsSource="{Binding ResizePresets}"
                                       DisplayMemberPath="Label"
                                       SelectedItem="{Binding SelectedResizePreset}"
                                       IsEnabled="{Binding Settings.Resize.Enabled}" />
 
-                            <controls:NumericSpinner Grid.Column="3"
-                                                     Margin="8,0,0,0"
+                            <controls:NumericSpinner Margin="8,0,0,0"
                                                      VerticalAlignment="Center"
                                                      Minimum="{x:Static models:ResizeOption.MinValue}"
                                                      Maximum="{x:Static models:ResizeOption.MaxValue}"
@@ -273,11 +264,10 @@
                                 </controls:NumericSpinner.Style>
                             </controls:NumericSpinner>
 
-                            <TextBlock Grid.Column="4"
-                                       Text="px 以内にする"
+                            <TextBlock Text="px 以内にする"
                                        Margin="6,0,0,0"
                                        VerticalAlignment="Center" />
-                        </Grid>
+                        </WrapPanel>
 
                         <TextBlock Text="指定より小さい画像はそのまま"
                                    Margin="92,0,0,12"
@@ -371,16 +361,17 @@
                             Command="{Binding SelectOutputFolderCommand}" />
                 </Grid>
 
-                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                    <StackPanel.Style>
-                        <Style TargetType="StackPanel">
+                <!-- 窓が狭いときは折り返す。横一列に固定すると「可逆」が切れて読めなくなる -->
+                <WrapPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <WrapPanel.Style>
+                        <Style TargetType="WrapPanel">
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsExporting}" Value="True">
                                     <Setter Property="IsEnabled" Value="False" />
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
-                    </StackPanel.Style>
+                    </WrapPanel.Style>
 
                     <TextBlock Text="形式:" VerticalAlignment="Center" Margin="0,0,8,0" />
 
@@ -430,7 +421,7 @@
                                   VerticalAlignment="Center"
                                   IsChecked="{Binding Output.WebPLossless}" />
                     </StackPanel>
-                </StackPanel>
+                </WrapPanel>
 
                 <TextBlock Text="透過は白で塗り潰されます"
                            Margin="0,6,0,0"
@@ -465,7 +456,7 @@
                         名前は長いと省略するが、拡張子は別の要素に分けて必ず残す。
                         末尾から削ると、一番見たい部分が最初に消えてしまうため。
                     -->
-                    <Grid Margin="0,0,0,6">
+                    <Grid x:Name="ExportProgressLine" Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
@@ -484,9 +475,11 @@
                         <!--
                             MaxWidth は TextBlock 側に付ける。ColumnDefinition の MaxWidth は
                             測定を制限しないため、TextTrimming が働かず単に切れてしまう。
+                            固定値にすると窓を広げても省略が解けないので、行の幅に対する割合で決める。
                         -->
                         <TextBlock Grid.Column="1"
-                                   MaxWidth="200"
+                                   MaxWidth="{Binding ActualWidth, ElementName=ExportProgressLine,
+                                              Converter={StaticResource WidthFraction}, ConverterParameter=0.38}"
                                    Text="{Binding ExportingSourceName}"
                                    TextTrimming="CharacterEllipsis" />
 
@@ -504,7 +497,8 @@
                         </TextBlock>
 
                         <TextBlock Grid.Column="3"
-                                   MaxWidth="200"
+                                   MaxWidth="{Binding ActualWidth, ElementName=ExportProgressLine,
+                                              Converter={StaticResource WidthFraction}, ConverterParameter=0.38}"
                                    Text="{Binding ExportingOutputName}"
                                    TextTrimming="CharacterEllipsis" />
 

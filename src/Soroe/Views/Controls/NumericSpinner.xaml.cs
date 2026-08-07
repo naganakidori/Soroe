@@ -118,8 +118,22 @@ public partial class NumericSpinner : UserControl
 
     private void OnStepDown(object sender, RoutedEventArgs e) => Nudge(-1);
 
+    /// <summary>
+    /// ホイールで値を増減する。ただしフォーカスがあるときだけ。
+    /// </summary>
+    /// <remarks>
+    /// 調整パネルはスクロールするため、通り過ぎただけのホイールで値が変わると、
+    /// スクロールしたつもりで設定が書き換わったことに気づけない。一括処理の設定が
+    /// 黙って変わるのは実害があるため、意図が明確な場合（一度クリックして
+    /// フォーカスがある場合）に限る。フォーカスが無いときはスクロールに流す。
+    /// </remarks>
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
     {
+        if (!IsKeyboardFocusWithin)
+        {
+            return;
+        }
+
         Nudge(Math.Sign(e.Delta));
         e.Handled = true;
     }
