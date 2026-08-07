@@ -64,4 +64,22 @@ public sealed partial class ExportSettings : ObservableObject
     /// <see cref="LosslessWebPQuality" /> になる。
     /// </summary>
     public int EffectiveWebPQuality => WebPLossless ? LosslessWebPQuality : WebPQuality;
+
+    /// <summary>
+    /// 現在の値をそのまま写した別インスタンスを返す。
+    /// </summary>
+    /// <remarks>
+    /// 書き出しはバックグラウンドで行うため、その間に画面側で値が書き換わっても
+    /// 影響が出ないよう、開始時点の値を固定するために使う。
+    /// <b>項目を追加したらここにも追加すること。</b>写し漏れると、画面で選んだ設定が
+    /// 黙って既定値に戻るという分かりにくい不具合になる。
+    /// </remarks>
+    public ExportSettings Clone() => new()
+    {
+        Folder = Folder,
+        Format = Format,
+        JpegQuality = JpegQuality,
+        WebPQuality = WebPQuality,
+        WebPLossless = WebPLossless,
+    };
 }

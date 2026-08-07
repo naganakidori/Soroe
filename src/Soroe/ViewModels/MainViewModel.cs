@@ -292,7 +292,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         // 処理中に画面側が変わっても影響しないよう、開始時点の値を写して渡す
         var paths = Files.Select(f => f.FullPath).ToArray();
-        var exportSettings = new ExportSettings { Folder = Output.Folder };
+        var exportSettings = Output.Clone();
         var processing = Settings.Clone();
 
         ExportFailures.Clear();
