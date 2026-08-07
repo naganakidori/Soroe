@@ -136,7 +136,12 @@
             <!-- 上がプレビュー、下が調整パネル -->
             <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="*" MinHeight="120" />
+                    <!--
+                        プレビュー側に MinHeight を置かないこと。Auto 行は場所が足りなくても
+                        縮まないため、MinHeight と競合すると合計が親をはみ出して下が切れる。
+                        プレビューを縮ませるほうが、調整パネルが見えなくなるより分かりやすい。
+                    -->
+                    <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
@@ -202,6 +207,10 @@
                             </Style.Triggers>
                         </Style>
                     </Border.Style>
+                    <!-- 項目が増えても縦に伸び続けないよう、上限を決めて中でスクロールさせる -->
+                    <ScrollViewer MaxHeight="220"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
                         <!--
                             調整パネルは 3 分類で区切る（CLAUDE.md「調整項目」）。
@@ -318,6 +327,7 @@
                                                      Value="{Binding Settings.Brightness.Value}" />
                         </Grid>
                     </StackPanel>
+                    </ScrollViewer>
                 </Border>
             </Grid>
         </Grid>
@@ -449,13 +459,57 @@
                         </Style>
                     </StackPanel.Style>
 
-                    <TextBlock Margin="0,0,0,6" TextTrimming="CharacterEllipsis">
-                        <Run Text="{Binding ExportCompleted, Mode=OneWay}" />
-                        <Run Text="/" />
-                        <Run Text="{Binding ExportTotal, Mode=OneWay}" />
-                        <Run Text="  " />
-                        <Run Text="{Binding ExportingFileName, Mode=OneWay}" />
-                    </TextBlock>
+                    <!--
+                        元の名前と出力名を並べる。形式やファイル名の指定が効いているかを
+                        実行中に確認できるようにするため。
+                        名前は長いと省略するが、拡張子は別の要素に分けて必ず残す。
+                        末尾から削ると、一番見たい部分が最初に消えてしまうため。
+                    -->
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0" Margin="0,0,10,0">
+                            <Run Text="{Binding ExportCompleted, Mode=OneWay}" />
+                            <Run Text="/" />
+                            <Run Text="{Binding ExportTotal, Mode=OneWay}" />
+                        </TextBlock>
+
+                        <!--
+                            MaxWidth は TextBlock 側に付ける。ColumnDefinition の MaxWidth は
+                            測定を制限しないため、TextTrimming が働かず単に切れてしまう。
+                        -->
+                        <TextBlock Grid.Column="1"
+                                   MaxWidth="200"
+                                   Text="{Binding ExportingSourceName}"
+                                   TextTrimming="CharacterEllipsis" />
+
+                        <TextBlock Grid.Column="2" Text="  →  ">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ExportingOutputName}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <TextBlock Grid.Column="3"
+                                   MaxWidth="200"
+                                   Text="{Binding ExportingOutputName}"
+                                   TextTrimming="CharacterEllipsis" />
+
+                        <TextBlock Grid.Column="4" Text="{Binding ExportingOutputExtension}" />
+                    </Grid>
 
                     <ProgressBar Height="6"
                                  Minimum="0"

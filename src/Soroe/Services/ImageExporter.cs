@@ -66,15 +66,25 @@ public sealed class ImageExporter : IImageExporter
             }
 
             var sourcePath = sourcePaths[i];
-            progress?.Report(new ExportProgress(i, sourcePaths.Count, Path.GetFileName(sourcePath)));
 
             try
             {
+                // 進捗に出力名も載せるため、先に出力先を確定させる。
+                // 同名衝突の連番までここで決まるので、報告するのは最終的な名前になる
                 var outputPath = _resolver.Resolve(sourcePath, settings);
 
                 // 安全ガード。出力先が元ファイルそのものなら、無条件で飛ばす。
                 // 呼び出し方に依存せず必ず通るよう、書き込みの直前のここで判定する
-                if (IsSamePath(sourcePath, outputPath))
+                var skipping = IsSamePath(sourcePath, outputPath);
+
+                progress?.Report(new ExportProgress(
+                    i,
+                    sourcePaths.Count,
+                    Path.GetFileName(sourcePath),
+                    skipping ? string.Empty : Path.GetFileName(outputPath),
+                    skipping));
+
+                if (skipping)
                 {
                     skipped++;
                     continue;
@@ -94,7 +104,7 @@ public sealed class ImageExporter : IImageExporter
             }
         }
 
-        progress?.Report(new ExportProgress(processed, sourcePaths.Count, string.Empty));
+        progress?.Report(new ExportProgress(processed, sourcePaths.Count, string.Empty, string.Empty, false));
         return ExportResult.Completed(exported, skipped, failures, canceled);
     }
 

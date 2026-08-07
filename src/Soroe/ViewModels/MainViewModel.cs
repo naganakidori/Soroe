@@ -212,9 +212,24 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty]
     public partial int ExportTotal { get; set; }
 
-    /// <summary>いま書き出しているファイル名。</summary>
+    /// <summary>いま処理している元ファイルの名前。</summary>
     [ObservableProperty]
-    public partial string ExportingFileName { get; set; } = string.Empty;
+    public partial string ExportingSourceName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 書き出し先のファイル名から拡張子を除いた部分。
+    /// </summary>
+    /// <remarks>
+    /// 拡張子を別に分けているのは、長い名前を省略しても拡張子を残すため。
+    /// この表示の主目的は形式の指定が効いているかの確認なので、末尾から削ると
+    /// 一番見たい部分が最初に失われる。
+    /// </remarks>
+    [ObservableProperty]
+    public partial string ExportingOutputName { get; set; } = string.Empty;
+
+    /// <summary>書き出し先のファイル名の拡張子。省略しない。</summary>
+    [ObservableProperty]
+    public partial string ExportingOutputExtension { get; set; } = string.Empty;
 
     /// <summary>
     /// 直前の書き出しで失敗したファイルの一覧。
@@ -298,7 +313,9 @@ public sealed partial class MainViewModel : ObservableObject
         ExportFailures.Clear();
         ExportCompleted = 0;
         ExportTotal = paths.Length;
-        ExportingFileName = string.Empty;
+        ExportingSourceName = string.Empty;
+        ExportingOutputName = string.Empty;
+        ExportingOutputExtension = string.Empty;
         IsExporting = true;
 
         // Progress<T> は生成時の SynchronizationContext を捕まえるため、
@@ -307,7 +324,19 @@ public sealed partial class MainViewModel : ObservableObject
         {
             ExportCompleted = p.Completed;
             ExportTotal = p.Total;
-            ExportingFileName = p.CurrentFileName;
+            ExportingSourceName = p.SourceFileName;
+
+            if (p.Skipped)
+            {
+                // 一瞬しか出ないうえ、件数は完了時にまとめて報告する。
+                // ここでは「書き出さなかった」ことだけ分かれば十分
+                ExportingOutputName = "スキップ（出力先が元ファイルと同じ）";
+                ExportingOutputExtension = string.Empty;
+                return;
+            }
+
+            ExportingOutputName = Path.GetFileNameWithoutExtension(p.OutputFileName);
+            ExportingOutputExtension = Path.GetExtension(p.OutputFileName);
         });
 
         using var cancellation = new CancellationTokenSource();
@@ -341,7 +370,9 @@ public sealed partial class MainViewModel : ObservableObject
         {
             _exportCancellation = null;
             IsExporting = false;
-            ExportingFileName = string.Empty;
+            ExportingSourceName = string.Empty;
+            ExportingOutputName = string.Empty;
+            ExportingOutputExtension = string.Empty;
         }
     }
 
