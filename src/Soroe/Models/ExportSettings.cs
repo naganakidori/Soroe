@@ -32,6 +32,9 @@ public sealed partial class ExportSettings : ObservableObject
 
     private int _jpegQuality = 95;
     private int _webPQuality = 95;
+    private string _prefix = string.Empty;
+    private string _suffix = string.Empty;
+    private string _sequenceBaseName = "photo";
 
     /// <summary>出力先フォルダの絶対パス。未選択なら <see langword="null" />。</summary>
     [ObservableProperty]
@@ -59,6 +62,48 @@ public sealed partial class ExportSettings : ObservableObject
     [ObservableProperty]
     public partial bool WebPLossless { get; set; }
 
+    /// <summary>出力ファイル名の決め方。</summary>
+    [ObservableProperty]
+    public partial FileNaming Naming { get; set; }
+
+    /// <summary>元のファイル名の前に足す文字。</summary>
+    public string Prefix
+    {
+        get => _prefix;
+        set => SetProperty(ref _prefix, FileNamePart.Sanitize(value));
+    }
+
+    /// <summary>元のファイル名の後ろに足す文字。</summary>
+    public string Suffix
+    {
+        get => _suffix;
+        set => SetProperty(ref _suffix, FileNamePart.Sanitize(value));
+    }
+
+    /// <summary>
+    /// 連番リネームのベース名。
+    /// </summary>
+    /// <remarks>
+    /// 空でもよい。その場合は区切りも付かず <c>001.jpg</c> のようになる。
+    /// 番号だけの連番にしたいという要求は普通にあるため、禁止しない。
+    /// </remarks>
+    public string SequenceBaseName
+    {
+        get => _sequenceBaseName;
+        set => SetProperty(ref _sequenceBaseName, FileNamePart.Sanitize(value));
+    }
+
+    /// <summary>
+    /// 同名のファイルがあるときに上書きするかどうか。
+    /// </summary>
+    /// <remarks>
+    /// オフのときは別名（<c>名前 (2).jpg</c>）で保存する。エクスプローラーのコピーと同じ挙動。
+    /// オンでも<b>同じ実行の中で書いたファイルは決して上書きしない</b>。
+    /// 上書きが意図するのは前回の実行結果の置き換えであって、今回の成果物ではないため。
+    /// </remarks>
+    [ObservableProperty]
+    public partial bool Overwrite { get; set; }
+
     /// <summary>
     /// 実際に OpenCV へ渡す WebP の品質。可逆が選ばれていれば
     /// <see cref="LosslessWebPQuality" /> になる。
@@ -81,5 +126,10 @@ public sealed partial class ExportSettings : ObservableObject
         JpegQuality = JpegQuality,
         WebPQuality = WebPQuality,
         WebPLossless = WebPLossless,
+        Naming = Naming,
+        Prefix = Prefix,
+        Suffix = Suffix,
+        SequenceBaseName = SequenceBaseName,
+        Overwrite = Overwrite,
     };
 }

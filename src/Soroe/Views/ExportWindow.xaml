@@ -10,10 +10,10 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:ExportDialogViewModel}"
         Title="書き出し"
-        Height="370"
-        Width="600"
-        MinHeight="360"
-        MinWidth="520"
+        Height="500"
+        MinHeight="480"
+        Width="620"
+        MinWidth="560"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip"
@@ -112,11 +112,86 @@
             </StackPanel>
         </WrapPanel>
 
-        <TextBlock Grid.Row="2"
-                   Text="透過は白で塗り潰されます"
-                   Margin="0,4,0,0"
-                   FontSize="11"
-                   Opacity="0.6" />
+        <StackPanel Grid.Row="2">
+            <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsExporting}" Value="True">
+                            <Setter Property="IsEnabled" Value="False" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </StackPanel.Style>
+
+            <TextBlock Text="透過は白で塗り潰されます"
+                       Margin="0,4,0,0"
+                       FontSize="11"
+                       Opacity="0.6" />
+
+            <!-- 出力ファイル名。選んだ方式の入力欄だけを出す -->
+            <WrapPanel Margin="0,12,0,0">
+                <TextBlock Text="ファイル名:" VerticalAlignment="Center" Margin="0,0,8,4" />
+
+                <ComboBox MinWidth="168"
+                          Margin="0,0,0,4"
+                          VerticalAlignment="Center"
+                          ItemsSource="{Binding NamingChoices}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Naming"
+                          SelectedValue="{Binding Output.Naming}" />
+
+                <StackPanel Orientation="Horizontal"
+                            Margin="20,0,0,4"
+                            Visibility="{Binding ShowPrefixSuffix, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="前" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBox Width="90"
+                             VerticalContentAlignment="Center"
+                             Text="{Binding Output.Prefix, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock Text="後" VerticalAlignment="Center" Margin="12,0,6,0" />
+                    <TextBox Width="90"
+                             VerticalContentAlignment="Center"
+                             Text="{Binding Output.Suffix, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal"
+                            Margin="20,0,0,4"
+                            Visibility="{Binding ShowSequence, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock Text="ベース名" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBox Width="120"
+                             VerticalContentAlignment="Center"
+                             Text="{Binding Output.SequenceBaseName, UpdateSourceTrigger=PropertyChanged}" />
+                </StackPanel>
+            </WrapPanel>
+
+            <TextBlock Text="&#x5c; / : * ? &quot; &lt; &gt; | は使えません"
+                       Margin="0,2,0,0"
+                       FontSize="11"
+                       Opacity="0.6">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ShowPrefixSuffix}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding ShowSequence}" Value="True">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+
+            <CheckBox Content="同名のファイルを上書きする"
+                      Margin="0,12,0,0"
+                      IsChecked="{Binding Output.Overwrite}" />
+
+            <TextBlock Text="同名のファイルがある場合は別名で保存します"
+                       Margin="0,4,0,0"
+                       FontSize="11"
+                       Opacity="0.6"
+                       Visibility="{Binding ShowRenameNotice, Converter={StaticResource BoolToVisibility}}" />
+        </StackPanel>
 
         <!--
             実行前の最後の確認と、実行後の結果。設定・実行・進捗・結果をこの窓で完結させる。
@@ -137,10 +212,68 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0"
-                           Text="{Binding OutputPathPreview}"
-                           ToolTip="{Binding OutputPathTooltip}"
-                           TextTrimming="CharacterEllipsis" />
+                <StackPanel Grid.Row="0">
+                    <TextBlock Text="{Binding OutputPathPreview}"
+                               ToolTip="{Binding OutputPathTooltip}"
+                               TextTrimming="CharacterEllipsis" />
+
+                    <!--
+                        上書きの件数。ここが原則 2（原本を絶対に破壊しない）に対する
+                        最後の確認になるので、警告色で目立たせる
+                    -->
+                    <TextBlock Margin="0,4,0,0"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource SystemFillColorCriticalBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding OverwriteCount}" Value="0">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                        <Run Text="うち" />
+                        <Run Text="{Binding OverwriteCount, Mode=OneWay}" />
+                        <Run Text="件を上書きします" />
+                    </TextBlock>
+
+                    <!-- 全件がスキップされる設定。実行ボタンも無効になる -->
+                    <TextBlock Margin="0,4,0,0"
+                               TextWrapping="Wrap"
+                               Text="{Binding BlockingWarning}"
+                               Foreground="{DynamicResource SystemFillColorCriticalBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding BlockingWarning}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!-- 押した時点で件数が変わっていた場合 -->
+                    <TextBlock Margin="0,4,0,0"
+                               TextWrapping="Wrap"
+                               Text="{Binding RecheckNotice}"
+                               Foreground="{DynamicResource SystemFillColorCautionBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding RecheckNotice}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
 
                 <!--
                     件数とファイル名はバーの上に置く。横に並べると文字数でバーの幅が

@@ -338,10 +338,11 @@ public sealed partial class MainViewModel : ObservableObject
 
         try
         {
-            // 実際に使う判定と同じ経路で求めるので、連番が付く場合はその名前が出る
-            var path = _exporter.ResolveOutputPath(first.FullPath, Output);
-            OutputPathPreview = $"{path}（{Files.Count} 件を処理）";
-            OutputPathTooltip = path;
+            // 実際に使う判定と同じ経路で求めるので、別名が付く場合はその名前が出る。
+            // 主画面では 1 件目だけ分かればよいので、件数の内訳までは求めない
+            var plan = _exporter.Plan([first.FullPath], Output);
+            OutputPathPreview = $"{plan.FirstOutputPath}（{Files.Count} 件を処理）";
+            OutputPathTooltip = plan.FirstOutputPath;
         }
         catch (Exception ex)
         {

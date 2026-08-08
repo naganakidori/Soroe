@@ -27,8 +27,26 @@ public sealed partial class ExportDialogViewModel : ObservableObject
     private readonly ProcessingSettings _processing;
     private readonly IReadOnlyList<string> _sourcePaths;
 
+    /// <summary>
+    /// 件数の計算を始めるまでの待ち時間。
+    /// </summary>
+    /// <remarks>
+    /// 上書き時は全件に <c>File.Exists</c> を掛けるため、入力のたびに走らせない。
+    /// ネットワークドライブや USB メモリでは 1 件あたりの確認が目に見えて遅い。
+    /// </remarks>
+    private static readonly TimeSpan PlanDelay = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>件数の計算を 1 度に 1 つだけに制限する。</summary>
+    private readonly SemaphoreSlim _planGate = new(1, 1);
+
     private CancellationTokenSource? _cancellation;
     private IReadOnlyList<ExportFailure> _lastFailures = [];
+
+    /// <summary>件数の計算要求の番号。新しい要求が来た時点で古い要求は用済みになる。</summary>
+    private int _planVersion;
+
+    /// <summary>画面に出している見積もり。</summary>
+    private ExportPlan _plan = ExportPlan.Empty;
 
     /// <summary>
     /// <see cref="ExportDialogViewModel" /> の新しいインスタンスを生成する。
@@ -56,10 +74,13 @@ public sealed partial class ExportDialogViewModel : ObservableObject
             RunCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(ShowJpegQuality));
             OnPropertyChanged(nameof(ShowWebPQuality));
-            UpdateOutputPathPreview();
+            OnPropertyChanged(nameof(ShowPrefixSuffix));
+            OnPropertyChanged(nameof(ShowSequence));
+            OnPropertyChanged(nameof(ShowRenameNotice));
+            _ = UpdatePlanAsync();
         };
 
-        UpdateOutputPathPreview();
+        _ = UpdatePlanAsync();
     }
 
     /// <summary>書き出しの設定。</summary>
@@ -87,6 +108,41 @@ public sealed partial class ExportDialogViewModel : ObservableObject
 
     /// <summary>WebP 品質の欄を出すかどうか。</summary>
     public bool ShowWebPQuality => Output.Format is ExportFormat.KeepOriginal or ExportFormat.WebP;
+
+    /// <summary>出力ファイル名の決め方の選択肢。</summary>
+    public IReadOnlyList<FileNamingChoice> NamingChoices { get; } =
+    [
+        new(FileNaming.KeepOriginal, "そのまま"),
+        new(FileNaming.PrefixSuffix, "前後に文字を足す"),
+        new(FileNaming.Sequence, "連番で付け直す"),
+    ];
+
+    /// <summary>プレフィックス・サフィックスの欄を出すかどうか。</summary>
+    /// <remarks>選んだ方式の欄だけを出す。効かない入力欄を並べない。</remarks>
+    public bool ShowPrefixSuffix => Output.Naming is FileNaming.PrefixSuffix;
+
+    /// <summary>連番のベース名の欄を出すかどうか。</summary>
+    public bool ShowSequence => Output.Naming is FileNaming.Sequence;
+
+    /// <summary>「同名なら別名で保存します」の案内を出すかどうか。</summary>
+    /// <remarks>
+    /// 上書きが選ばれているときは件数の警告がその役目を果たすので、重ねて出さない。
+    /// </remarks>
+    public bool ShowRenameNotice => !Output.Overwrite;
+
+    /// <summary>上書きする件数。0 なら表示しない。</summary>
+    [ObservableProperty]
+    public partial int OverwriteCount { get; set; }
+
+    /// <summary>
+    /// 全件がスキップされる場合の警告。該当しなければ空。
+    /// </summary>
+    [ObservableProperty]
+    public partial string BlockingWarning { get; set; } = string.Empty;
+
+    /// <summary>実行を押した後に出す注意。件数が変わって実行を見送ったときに使う。</summary>
+    [ObservableProperty]
+    public partial string RecheckNotice { get; set; } = string.Empty;
 
     /// <summary>実行中かどうか。</summary>
     [ObservableProperty]
@@ -146,7 +202,13 @@ public sealed partial class ExportDialogViewModel : ObservableObject
     /// 「出力先を指定するためにダイアログを開く」ためのものなので、
     /// 出力先を条件にすると開けなくなる。
     /// </remarks>
-    public bool CanRun => !IsExporting && !string.IsNullOrWhiteSpace(Output.Folder);
+    /// <remarks>
+    /// 全件がスキップされる設定では実行させない。押しても 1 枚も書き出されず、
+    /// 「壊れている」という印象になる。設定を直す場所はこのダイアログの中にあるので、
+    /// 無効にしても手詰まりにはならない。<b>一部だけのスキップでは無効にしない</b> —
+    /// 残りは正しく書き出される、正当な実行だから。
+    /// </remarks>
+    public bool CanRun => !IsExporting && !string.IsNullOrWhiteSpace(Output.Folder) && !_plan.IsAllSkipped;
 
     /// <summary>
     /// 出力先フォルダを選ばせる。
@@ -169,6 +231,26 @@ public sealed partial class ExportDialogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanRun))]
     private async Task RunAsync()
     {
+        RecheckNotice = string.Empty;
+
+        // 表示している件数が古いまま実行してはいけない。この件数は単なる情報ではなく、
+        // 「うち 3 件を上書き」という最後の確認そのものだから。押した時点で確定させる
+        var shown = _plan;
+        var confirmed = await ConfirmPlanAsync().ConfigureAwait(true);
+
+        // ただし見送るのは「確認が要る内容」を含むときだけ。上書きも全件スキップも
+        // 無い見積もりなら、確認すべきものが無いのでそのまま進めてよい
+        if (confirmed != shown && NeedsConfirmation(confirmed))
+        {
+            RecheckNotice = "設定が変わったため件数を計算し直しました。内容を確認してもう一度実行してください";
+            return;
+        }
+
+        if (confirmed.IsAllSkipped)
+        {
+            return;
+        }
+
         // 処理中に値が変わっても影響しないよう、開始時点の値を写して渡す
         var exportSettings = Output.Clone();
         var processing = _processing.Clone();
@@ -242,8 +324,8 @@ public sealed partial class ExportDialogViewModel : ObservableObject
             ExportingOutputName = string.Empty;
             ExportingOutputExtension = string.Empty;
 
-            // 連番の付き方が変わるので、出力先の表示を作り直す
-            UpdateOutputPathPreview();
+            // 書き出した結果、既存ファイルが増えて別名の付き方が変わる
+            _ = UpdatePlanAsync();
         }
     }
 
@@ -304,35 +386,130 @@ public sealed partial class ExportDialogViewModel : ObservableObject
         return text;
     }
 
-    private void UpdateOutputPathPreview()
+    /// <summary>
+    /// 見積もりを計算し直して表示へ反映する。
+    /// </summary>
+    /// <remarks>
+    /// 上書き時は全件に <c>File.Exists</c> が走るため、少し待ってからバックグラウンドで行う。
+    /// 走っている間に新しい要求が来たら古いほうは捨てる（プレビュー生成と同じ形）。
+    /// </remarks>
+    private async Task UpdatePlanAsync()
     {
+        var version = Interlocked.Increment(ref _planVersion);
+
+        // 上書きしないなら全件を調べないので、待つ意味がない
+        if (Output.Overwrite)
+        {
+            try
+            {
+                await Task.Delay(PlanDelay).ConfigureAwait(true);
+            }
+            catch (TaskCanceledException)
+            {
+                return;
+            }
+
+            if (Volatile.Read(ref _planVersion) != version)
+            {
+                return;
+            }
+        }
+
+        await _planGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            if (Volatile.Read(ref _planVersion) != version)
+            {
+                return;
+            }
+
+            var settings = Output.Clone();
+            var plan = await Task.Run(() => Calculate(settings)).ConfigureAwait(true);
+
+            if (Volatile.Read(ref _planVersion) != version)
+            {
+                return;
+            }
+
+            Apply(plan);
+        }
+        finally
+        {
+            _planGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// その見積もりに、実行前の確認が要る内容が含まれるか。
+    /// </summary>
+    private static bool NeedsConfirmation(ExportPlan plan) => plan.OverwriteCount > 0 || plan.IsAllSkipped;
+
+    /// <summary>
+    /// 実行の直前に見積もりを確定させる。
+    /// </summary>
+    /// <remarks>遅延や計算の途中でも、待って最新の値を得る。</remarks>
+    private async Task<ExportPlan> ConfirmPlanAsync()
+    {
+        var version = Interlocked.Increment(ref _planVersion);
+        await _planGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            var settings = Output.Clone();
+            var plan = await Task.Run(() => Calculate(settings)).ConfigureAwait(true);
+            if (Volatile.Read(ref _planVersion) == version)
+            {
+                Apply(plan);
+            }
+
+            return plan;
+        }
+        finally
+        {
+            _planGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 見積もりを求める。失敗した場合は理由を表示に載せる。
+    /// </summary>
+    private ExportPlan Calculate(ExportSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.Folder) || _sourcePaths.Count == 0)
+        {
+            return ExportPlan.Empty;
+        }
+
+        return _exporter.Plan(_sourcePaths, settings);
+    }
+
+    private void Apply(ExportPlan plan)
+    {
+        _plan = plan;
+        RunCommand.NotifyCanExecuteChanged();
+        OverwriteCount = plan.OverwriteCount;
+
         if (string.IsNullOrWhiteSpace(Output.Folder))
         {
             OutputPathPreview = "出力先が未設定です";
             OutputPathTooltip = string.Empty;
+            BlockingWarning = string.Empty;
             return;
         }
 
-        var first = _sourcePaths.FirstOrDefault();
-        if (first is null)
+        if (_sourcePaths.Count == 0)
         {
             OutputPathPreview = "処理する画像がありません";
             OutputPathTooltip = string.Empty;
+            BlockingWarning = string.Empty;
             return;
         }
 
-        try
-        {
-            // 実際に使う判定と同じ経路で求めるので、連番が付く場合はその名前が出る
-            var path = _exporter.ResolveOutputPath(first, Output);
-            OutputPathPreview = $"{path}（{FileCount} 件を処理）";
-            OutputPathTooltip = path;
-        }
-        catch (Exception ex)
-        {
-            FileErrorMessage.Log("出力先の確認", ex);
-            OutputPathPreview = $"出力先を確認してください: {FileErrorMessage.Describe(ex, Output.Folder)}";
-            OutputPathTooltip = string.Empty;
-        }
+        OutputPathPreview = $"{plan.FirstOutputPath}（{plan.Total} 件を処理）";
+        OutputPathTooltip = plan.FirstOutputPath;
+
+        BlockingWarning = plan.IsAllSkipped
+            ? $"この設定では {plan.Total} 件すべてがスキップされます。"
+                + "出力先が元のファイルと同じになるためです。出力先かファイル名を変えてください"
+            : string.Empty;
     }
 }

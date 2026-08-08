@@ -31,11 +31,18 @@ public interface IImageExporter
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// 1 枚の出力先を、実際には書き出さずに求める。
+    /// 実行したらどうなるかを、実際には書き出さずに求める。
     /// </summary>
-    /// <param name="sourcePath">元ファイルの絶対パス。</param>
+    /// <param name="sourcePaths">元ファイルの絶対パス。リストの順に評価する。</param>
     /// <param name="settings">書き出しの設定。</param>
-    /// <returns>出力先の絶対パス。</returns>
-    /// <remarks>実行前に出力先を画面へ 1 行表示するために使う。</remarks>
-    string ResolveOutputPath(string sourcePath, ExportSettings settings);
+    /// <returns>出力先の例と件数の見積もり。</returns>
+    /// <remarks>
+    /// <see cref="Export" /> と同じ解決処理を同じ順で回すので、表示と結果が一致する。
+    /// <para>
+    /// 上書きが選ばれていない場合、既存ファイルは必ず避けられるため
+    /// <see cref="ExportPlan.OverwriteCount" /> も <see cref="ExportPlan.SkippedCount" /> も
+    /// 必ず 0 になる。その場合は全件を調べず、1 件目だけを解決する。
+    /// </para>
+    /// </remarks>
+    ExportPlan Plan(IReadOnlyList<string> sourcePaths, ExportSettings settings);
 }

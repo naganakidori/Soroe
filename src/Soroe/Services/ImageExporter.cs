@@ -32,8 +32,73 @@ public sealed class ImageExporter : IImageExporter
     }
 
     /// <inheritdoc />
-    public string ResolveOutputPath(string sourcePath, ExportSettings settings)
-        => _resolver.Resolve(sourcePath, settings);
+    public ExportPlan Plan(IReadOnlyList<string> sourcePaths, ExportSettings settings)
+    {
+        if (sourcePaths.Count == 0)
+        {
+            return ExportPlan.Empty;
+        }
+
+        var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 上書きしないなら既存ファイルは必ず避けられる。したがって置き換えも
+        // 元ファイルとの一致も起こりえない。全件を調べる必要がない
+        if (!settings.Overwrite)
+        {
+            return new ExportPlan(
+                _resolver.Resolve(sourcePaths[0], settings, 0, sourcePaths.Count, reserved),
+                sourcePaths.Count,
+                0,
+                0);
+        }
+
+        var sources = BuildSourceSet(sourcePaths);
+        var first = string.Empty;
+        var overwrite = 0;
+        var skipped = 0;
+
+        for (var i = 0; i < sourcePaths.Count; i++)
+        {
+            var outputPath = _resolver.Resolve(sourcePaths[i], settings, i, sourcePaths.Count, reserved);
+            if (i == 0)
+            {
+                first = outputPath;
+            }
+
+            if (sources.Contains(outputPath))
+            {
+                skipped++;
+                continue;
+            }
+
+            reserved.Add(outputPath);
+            if (File.Exists(outputPath))
+            {
+                overwrite++;
+            }
+        }
+
+        return new ExportPlan(first, sourcePaths.Count, overwrite, skipped);
+    }
+
+    /// <summary>
+    /// 安全ガードの比較対象。<b>リスト内のすべての入力パス</b>を集める。
+    /// </summary>
+    /// <remarks>
+    /// 自分自身とだけ比べるのでは足りない。例えば <c>IMG_0001.jpg</c> と
+    /// <c>小_IMG_0001.jpg</c> が同じリストにあり、同フォルダ出力・プレフィックス
+    /// <c>小_</c>・上書き ON だと、前者の処理結果が後者（別の原本）を潰してしまう。
+    /// </remarks>
+    private static HashSet<string> BuildSourceSet(IReadOnlyList<string> sourcePaths)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in sourcePaths)
+        {
+            set.Add(Path.GetFullPath(path));
+        }
+
+        return set;
+    }
 
     /// <inheritdoc />
     public ExportResult Export(
@@ -57,6 +122,12 @@ public sealed class ImageExporter : IImageExporter
         var canceled = false;
         var processed = 0;
 
+        // 安全ガードの比較対象。リスト内のすべての入力パスと突き合わせる
+        var sources = BuildSourceSet(sourcePaths);
+
+        // この実行で使うと決めたパス。上書きが選ばれていても、ここにあるものは避ける
+        var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         for (var i = 0; i < sourcePaths.Count; i++)
         {
             // 1 枚のエンコードは長くても数百 ms なので、その途中で割り込む必要はない
@@ -72,11 +143,12 @@ public sealed class ImageExporter : IImageExporter
             {
                 // 進捗に出力名も載せるため、先に出力先を確定させる。
                 // 同名衝突の連番までここで決まるので、報告するのは最終的な名前になる
-                var outputPath = _resolver.Resolve(sourcePath, settings);
+                var outputPath = _resolver.Resolve(sourcePath, settings, i, sourcePaths.Count, reserved);
 
-                // 安全ガード。出力先が元ファイルそのものなら、無条件で飛ばす。
+                // 安全ガード。出力先が「リスト内のいずれかの原本」と一致したら無条件で飛ばす。
+                // 自分自身とだけ比べるのでは足りない。別の原本を処理結果で潰す経路が残る。
                 // 呼び出し方に依存せず必ず通るよう、書き込みの直前のここで判定する
-                var skipping = IsSamePath(sourcePath, outputPath);
+                var skipping = sources.Contains(Path.GetFullPath(outputPath));
 
                 progress?.Report(new ExportProgress(
                     i,
@@ -90,6 +162,10 @@ public sealed class ImageExporter : IImageExporter
                     skipped++;
                     continue;
                 }
+
+                // 書き込みの成否に関わらず予約する。同じ実行の中で同じ名前を
+                // 二度使わないことが目的なので、失敗した枠も空けない
+                reserved.Add(outputPath);
 
                 ExportOne(sourcePath, outputPath, processing, settings);
                 exported++;
@@ -145,8 +221,10 @@ public sealed class ImageExporter : IImageExporter
         {
             File.WriteAllBytes(tempPath, bytes);
 
-            // 同じフォルダ内なので、移動は実質的に名前の付け替えで済む
-            File.Move(tempPath, outputPath);
+            // 同じフォルダ内なので、移動は実質的に名前の付け替えで済む。
+            // 上書きしない設定なら空きパスが保証されているので overwrite も false でよい。
+            // 常に true にすると、想定外の衝突が起きたときに気づけなくなる
+            File.Move(tempPath, outputPath, overwrite: settings.Overwrite);
         }
         finally
         {

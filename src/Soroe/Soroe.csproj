@@ -17,6 +17,9 @@
 
     <!-- public メンバーの XML ドキュメントコメント漏れを検知させる -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- 長いパスを許可する。詳細は app.manifest のコメントを参照 -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
