@@ -80,6 +80,13 @@ public sealed partial class ExportDialogViewModel : ObservableObject
             _ = UpdatePlanAsync();
         };
 
+        // 見積もりは非同期に届くので、開いた直後に案内が空欄になる。
+        // ファイル入出力の要らない案内だけは先に出しておく
+        if (string.IsNullOrWhiteSpace(Output.Folder) || sourcePaths.Count == 0)
+        {
+            Apply(ExportPlan.Empty);
+        }
+
         _ = UpdatePlanAsync();
     }
 
@@ -251,6 +258,8 @@ public sealed partial class ExportDialogViewModel : ObservableObject
             return;
         }
 
+        // 表示中の見積もりに基づく実行ボタンの無効化は、古い値のまま有効な瞬間がある。
+        // 破壊は起きないが、0 件で終わって理由が分からない状態になるのでここでも止める
         if (confirmed.IsAllSkipped)
         {
             return;
