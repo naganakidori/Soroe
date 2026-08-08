@@ -239,7 +239,12 @@ public sealed partial class ExportDialogViewModel : ObservableObject
         var confirmed = await ConfirmPlanAsync().ConfigureAwait(true);
 
         // ただし見送るのは「確認が要る内容」を含むときだけ。上書きも全件スキップも
-        // 無い見積もりなら、確認すべきものが無いのでそのまま進めてよい
+        // 無い見積もりなら、確認すべきものが無いのでそのまま進めてよい。
+        //
+        // 判定は必ず confirmed（最新）で行う。shown（表示していた古い方）で判定すると、
+        // 上書きに切り替えた直後にすぐ実行を押した場合、古い件数が 0 のまま
+        // 「確認するものが無い」と誤判定して全件を上書きしてしまう。
+        // 上書きへ切り替えた直後が最も危ないタイミングであり、そこが抜ける
         if (confirmed != shown && NeedsConfirmation(confirmed))
         {
             RecheckNotice = "設定が変わったため件数を計算し直しました。内容を確認してもう一度実行してください";
