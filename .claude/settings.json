@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "PowerShell(dotnet build *)",
+      "PowerShell(dotnet run *)",
+      "PowerShell(dotnet test *)",
+      "PowerShell(dotnet restore *)",
+      "PowerShell(dotnet add *)",
+      "PowerShell(dotnet format *)",
+      "PowerShell(dotnet --version)",
+      "PowerShell(git *)"
+    ],
+    "ask": [
+      "PowerShell(git push *)",
+      "PowerShell(git reset *)",
+      "PowerShell(git clean *)",
+      "PowerShell(git rebase *)",
+      "PowerShell(git branch -D *)",
+      "PowerShell(Remove-Item *)"
+    ],
+    "deny": [
+      "Read(**/*.pfx)",
+      "Read(**/*.snk)"
+    ]
+  }
+}
