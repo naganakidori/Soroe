@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Soroe/Soroe.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Soroe.Verify/Soroe.Verify.csproj" />
+  </Folder>
 </Solution>
