@@ -88,7 +88,7 @@ public sealed partial class ExportDialogViewModel : ObservableObject
         // ファイル入出力の要らない案内だけは先に出しておく
         if (string.IsNullOrWhiteSpace(Output.Folder) || sourcePaths.Count == 0)
         {
-            Apply(ExportPlan.Empty);
+            Apply(ExportPlan.Empty, folderMissing: false);
         }
 
         _ = UpdatePlanAsync();
@@ -150,6 +150,21 @@ public sealed partial class ExportDialogViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     public partial string BlockingWarning { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 出力先のフォルダが見つからない場合の注意。該当しなければ空。
+    /// </summary>
+    /// <remarks>
+    /// 出力先は前回の設定として復元されるため、外付けドライブやネットワーク共有だと
+    /// 次の起動時には無くなっていることがある。実行して初めて分かるより先に伝える。
+    /// <para>
+    /// <b>これで実行を止めはしない。</b>全件スキップと違って設定の誤りではなく、
+    /// 繋ぎ直せば解消する一時的な状態だから。実行した場合も、書き込み確認が
+    /// 同じ理由で中止させるので原本は危険にさらされない。
+    /// </para>
+    /// </remarks>
+    [ObservableProperty]
+    public partial string FolderNotice { get; set; } = string.Empty;
 
     /// <summary>実行を押した後に出す注意。件数が変わって実行を見送ったときに使う。</summary>
     [ObservableProperty]
@@ -459,14 +474,14 @@ public sealed partial class ExportDialogViewModel : ObservableObject
             }
 
             var settings = Output.Clone();
-            var plan = await Task.Run(() => Calculate(settings)).ConfigureAwait(true);
+            var estimate = await Task.Run(() => Calculate(settings)).ConfigureAwait(true);
 
             if (Volatile.Read(ref _planVersion) != version)
             {
                 return;
             }
 
-            Apply(plan);
+            Apply(estimate.Plan, estimate.FolderMissing);
         }
         finally
         {
@@ -500,13 +515,13 @@ public sealed partial class ExportDialogViewModel : ObservableObject
         try
         {
             var settings = Output.Clone();
-            var plan = await Task.Run(() => Calculate(settings)).ConfigureAwait(true);
+            var estimate = await Task.Run(() => Calculate(settings)).ConfigureAwait(true);
             if (Volatile.Read(ref _planVersion) == version)
             {
-                Apply(plan);
+                Apply(estimate.Plan, estimate.FolderMissing);
             }
 
-            return plan;
+            return estimate.Plan;
         }
         finally
         {
@@ -515,19 +530,35 @@ public sealed partial class ExportDialogViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 見積もりを求める。失敗した場合は理由を表示に載せる。
+    /// 見積もりの結果。
     /// </summary>
-    private ExportPlan Calculate(ExportSettings settings)
+    /// <param name="Plan">書き出しと同じ解決処理で求めた見積もり。</param>
+    /// <param name="FolderMissing">出力先のフォルダが見つからなかったかどうか。</param>
+    private readonly record struct Estimate(ExportPlan Plan, bool FolderMissing);
+
+    /// <summary>
+    /// 見積もりを求める。
+    /// </summary>
+    /// <remarks>
+    /// <b>必ずバックグラウンドで呼ぶこと。</b>ファイルの有無を調べるため、応答しない
+    /// ネットワークドライブや取り外し済みの USB メモリではタイムアウトまで数秒戻らない。
+    /// UI スレッドで呼ぶと、その間ダイアログが固まる。
+    /// </remarks>
+    private Estimate Calculate(ExportSettings settings)
     {
         if (string.IsNullOrWhiteSpace(settings.Folder) || _sourcePaths.Count == 0)
         {
-            return ExportPlan.Empty;
+            return new Estimate(ExportPlan.Empty, FolderMissing: false);
         }
 
-        return _exporter.Plan(_sourcePaths, settings);
+        // 存在確認をここに置いているのは、遅延・バックグラウンド・最新優先という
+        // 仕組みが既にあるため。同期の経路に足すと、その恩恵を受けられない
+        var folderMissing = !Directory.Exists(settings.Folder);
+
+        return new Estimate(_exporter.Plan(_sourcePaths, settings), folderMissing);
     }
 
-    private void Apply(ExportPlan plan)
+    private void Apply(ExportPlan plan, bool folderMissing)
     {
         _plan = plan;
         RunCommand.NotifyCanExecuteChanged();
@@ -538,8 +569,13 @@ public sealed partial class ExportDialogViewModel : ObservableObject
             OutputPathPreview = "出力先が未設定です";
             OutputPathTooltip = string.Empty;
             BlockingWarning = string.Empty;
+            FolderNotice = string.Empty;
             return;
         }
+
+        FolderNotice = folderMissing
+            ? "出力先のフォルダが見つかりません。取り外したドライブや、移動・削除されたフォルダかもしれません"
+            : string.Empty;
 
         if (_sourcePaths.Count == 0)
         {

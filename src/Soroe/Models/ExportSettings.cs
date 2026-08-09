@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Soroe.Models;
@@ -108,6 +109,11 @@ public sealed partial class ExportSettings : ObservableObject
     /// 実際に OpenCV へ渡す WebP の品質。可逆が選ばれていれば
     /// <see cref="LosslessWebPQuality" /> になる。
     /// </summary>
+    /// <remarks>
+    /// 他の 2 つから導出される値なので保存しない。書き出すと、設定ファイルを直接
+    /// 編集した人が「ここを変えれば効く」と誤解する。
+    /// </remarks>
+    [JsonIgnore]
     public int EffectiveWebPQuality => WebPLossless ? LosslessWebPQuality : WebPQuality;
 
     /// <summary>

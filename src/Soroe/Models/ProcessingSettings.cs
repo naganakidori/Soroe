@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 
 namespace Soroe.Models;
 
@@ -13,6 +14,13 @@ namespace Soroe.Models;
 /// 各項目が <c>Enabled</c> を持つ。JSON のポリモーフィックシリアライズが不要になる。
 /// </para>
 /// </remarks>
+/// <remarks>
+/// <see cref="Resize" /> などの項目は setter を持たない（差し替えると
+/// <see cref="Changed" /> の購読が切れるため）。読み込み時に新しいインスタンスへ
+/// 差し替えるのではなく、既存のインスタンスへ値を書き込ませる必要があるので
+/// <see cref="JsonObjectCreationHandling.Populate" /> を指定している。
+/// </remarks>
+[JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
 public sealed class ProcessingSettings
 {
     /// <summary>

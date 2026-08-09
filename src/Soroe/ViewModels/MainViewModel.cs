@@ -60,16 +60,26 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>
     /// <see cref="MainViewModel" /> の新しいインスタンスを生成する。
     /// </summary>
+    /// <param name="settings">全件に適用する調整の設定。復元したものを渡す。</param>
+    /// <param name="output">書き出しの設定。復元したものを渡す。</param>
     /// <param name="renderer">画像の読み込みと加工に使う実装。</param>
     /// <param name="exporter">書き出しに使う実装。</param>
     /// <param name="folderPicker">フォルダ選択ダイアログの実装。</param>
     /// <param name="exportDialog">書き出しの設定・確認ダイアログの実装。</param>
+    /// <remarks>
+    /// 設定を外から受け取るのは、復元した値を後から書き写す経路を作らないため。
+    /// 写す実装にすると、項目を足したときに写し漏れる（<c>Clone</c> と同じ落とし穴）。
+    /// </remarks>
     public MainViewModel(
+        ProcessingSettings settings,
+        ExportSettings output,
         IImageRenderer renderer,
         IImageExporter exporter,
         IFolderPicker folderPicker,
         IExportDialog exportDialog)
     {
+        Settings = settings;
+        Output = output;
         _renderer = renderer;
         _exporter = exporter;
         _folderPicker = folderPicker;
@@ -111,11 +121,11 @@ public sealed partial class MainViewModel : ObservableObject
     /// 全件に適用する調整の設定。
     /// </summary>
     /// <remarks>
-    /// プリセットの読み込みを実装する際は、このインスタンスを差し替えるのではなく
+    /// 名前付きプリセットの読み込みを実装する際は、このインスタンスを差し替えるのではなく
     /// 各項目に値を書き込むこと。差し替えるとバインドと <see cref="ProcessingSettings.Changed" />
     /// の購読が切れる。
     /// </remarks>
-    public ProcessingSettings Settings { get; } = new();
+    public ProcessingSettings Settings { get; }
 
     /// <summary>リストで選択中の 1 件。プレビューの対象になる。</summary>
     [ObservableProperty]
@@ -168,7 +178,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// 設定の編集はダイアログが担う。ダイアログはこの実体をそのまま書き換えるので、
     /// 閉じた後も値が残り、サマリ行も追随する。
     /// </remarks>
-    public ExportSettings Output { get; } = new();
+    public ExportSettings Output { get; }
 
     /// <summary>書き出しボタンの上に出す、出力先の 1 行表示。</summary>
     [ObservableProperty]

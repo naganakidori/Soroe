@@ -263,6 +263,27 @@
                         </TextBlock.Style>
                     </TextBlock>
 
+                    <!--
+                        出力先が見つからない場合。前回の設定を復元する以上、
+                        外付けドライブや共有フォルダが無くなっていることはある。
+                        設定の誤りではないので実行は止めず、注意色にとどめる
+                    -->
+                    <TextBlock Margin="0,4,0,0"
+                               TextWrapping="Wrap"
+                               Text="{Binding FolderNotice}"
+                               Foreground="{DynamicResource SystemFillColorCautionBrush}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding FolderNotice}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
                     <!-- 押した時点で件数が変わっていた場合 -->
                     <TextBlock Margin="0,4,0,0"
                                TextWrapping="Wrap"
