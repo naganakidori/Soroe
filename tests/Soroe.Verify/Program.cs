@@ -370,6 +370,8 @@ internal static class Program
         Mutate(processing, "ProcessingSettings", changed, unchangeable);
         Mutate(export, "ExportSettings", changed, unchangeable);
 
+        Console.WriteLine($"    往復の対象: {string.Join(", ", changed)}");
+
         Check($"保存前に全プロパティを既定と変えられた（{changed.Count} 項目）",
             unchangeable.Count == 0, string.Join(", ", unchangeable));
         Check("上書きが ON になっている（除外の検証に必要）", export.Overwrite);
@@ -501,7 +503,9 @@ internal static class Program
             .Concat(LeafProperties(export, "ExportSettings"))
             .ToList();
 
-        Check($"保存対象のプロパティを列挙できた（{leaves.Count} 項目）", leaves.Count >= 15, $"{leaves.Count}");
+        Console.WriteLine($"    引き金の対象: {string.Join(", ", leaves.Select(l => l.Path))}");
+
+        Check($"保存対象のプロパティを列挙できた（{leaves.Count} 項目）", leaves.Count >= 19, $"{leaves.Count}");
 
         var silent = new List<string>();
         var unchangeable = new List<string>();
@@ -752,6 +756,9 @@ internal static class Program
         var changed = new List<string>();
         var unchangeable = new List<string>();
         Mutate(original, label, changed, unchangeable);
+
+        // 項目を足したときに実際に対象へ入っているかを目で確かめられるよう、名前を出す
+        Console.WriteLine($"    {label} の対象: {string.Join(", ", changed)}");
 
         Check($"{label}: 全プロパティに既定と違う値を入れられた（{changed.Count} 項目）",
             unchangeable.Count == 0, string.Join(", ", unchangeable));
@@ -1129,16 +1136,26 @@ internal static class Program
         var renderer = new ImageRenderer();
         var settings = new ProcessingSettings();
         settings.Brightness.Enabled = true;
+        settings.Contrast.Enabled = true;
+        settings.Saturation.Enabled = true;
 
         // 明るさだけでは倍率の影響を受けないため、リサイズ有効の組み合わせも通す。
         // これを入れて初めて previewScale がこのテストに効いてくる
-        foreach (var (value, maxEdge, resizeTo) in new[]
+        foreach (var (value, contrast, saturation, maxEdge, resizeTo) in new[]
                  {
-                     (0, 0, 0), (37, 0, 0), (-63, 0, 0), (37, 80, 0),
-                     (0, 0, 100), (37, 0, 100), (37, 80, 100), (-20, 120, 64),
+                     (0, 0, 0, 0, 0), (37, 0, 0, 0, 0), (-63, 0, 0, 0, 0), (37, 0, 0, 80, 0),
+                     (0, 0, 0, 0, 100), (37, 0, 0, 0, 100), (37, 0, 0, 80, 100), (-20, 0, 0, 120, 64),
+
+                     // コントラストと彩度。単独と、明るさ・リサイズとの組み合わせ
+                     (0, 55, 0, 0, 0), (0, -100, 0, 0, 0), (0, 100, 0, 0, 0),
+                     (0, 0, 73, 0, 0), (0, 0, -100, 0, 0), (0, 0, 100, 0, 0),
+                     (37, 55, 73, 0, 0), (-63, -40, -55, 0, 0),
+                     (37, 55, 73, 80, 100), (-20, -40, -55, 120, 64),
                  })
         {
             settings.Brightness.Value = value;
+            settings.Contrast.Value = contrast;
+            settings.Saturation.Value = saturation;
             settings.Resize.Enabled = resizeTo > 0;
             if (resizeTo > 0) settings.Resize.LongestEdge = resizeTo;
 
@@ -1149,7 +1166,8 @@ internal static class Program
             var encoded = renderer.Encode(source, settings, source.Scale, new EncodeSettings { Extension = ".png" });
             using var decoded = Cv2.ImDecode(encoded, ImreadModes.Color);
 
-            var label = $"明るさ {value,4}、倍率 {source.Scale:F2}、リサイズ {(resizeTo > 0 ? resizeTo.ToString() : "なし"),4}";
+            var label = $"明 {value,4} コン {contrast,4} 彩 {saturation,4}、倍率 {source.Scale:F2}、"
+                + $"リサイズ {(resizeTo > 0 ? resizeTo.ToString() : "なし"),4}";
             if (rendered.PixelWidth != decoded.Width || rendered.PixelHeight != decoded.Height)
             {
                 Check($"{label}: 寸法が一致", false, $"{rendered.PixelWidth}x{rendered.PixelHeight} と {decoded.Width}x{decoded.Height}");

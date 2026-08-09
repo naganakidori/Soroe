@@ -34,6 +34,8 @@ public sealed class ProcessingSettings
         // 購読側（ViewModel）が項目ごとに購読し直さずに済む。
         Resize.PropertyChanged += OnOptionChanged;
         Brightness.PropertyChanged += OnOptionChanged;
+        Contrast.PropertyChanged += OnOptionChanged;
+        Saturation.PropertyChanged += OnOptionChanged;
     }
 
     /// <summary>
@@ -70,6 +72,12 @@ public sealed class ProcessingSettings
     /// <summary>明るさ（適用順序 3 番目）。</summary>
     public BrightnessOption Brightness { get; } = new();
 
+    /// <summary>コントラスト（適用順序 3 番目。明るさと同じ LUT で一括適用）。</summary>
+    public ContrastOption Contrast { get; } = new();
+
+    /// <summary>彩度（適用順序 4 番目）。</summary>
+    public SaturationOption Saturation { get; } = new();
+
     /// <summary>
     /// 現在の値をそのまま写した別インスタンスを返す。
     /// </summary>
@@ -90,6 +98,16 @@ public sealed class ProcessingSettings
         {
             Enabled = Brightness.Enabled,
             Value = Brightness.Value,
+        },
+        Contrast =
+        {
+            Enabled = Contrast.Enabled,
+            Value = Contrast.Value,
+        },
+        Saturation =
+        {
+            Enabled = Saturation.Enabled,
+            Value = Saturation.Value,
         },
     };
 

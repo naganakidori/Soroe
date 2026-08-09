@@ -208,8 +208,17 @@
                             </Style.Triggers>
                         </Style>
                     </Border.Style>
-                    <!-- 項目が増えても縦に伸び続けないよう、上限を決めて中でスクロールさせる -->
-                    <ScrollViewer MaxHeight="220"
+                    <!--
+                        項目が増えても縦に伸び続けないよう、上限を決めて中でスクロールさせる。
+                        プレビューは残りをもらう側なので、ここを上げるとプレビューが縮む。
+
+                        この値は実装済みの項目数に合わせて決めている。2 項目のときは 220 で
+                        足りていたが、4 項目で 227.9 になり、既定サイズでもスクロールが出た。
+                        既定サイズで全項目が見えることを、項目を足すたびに測り直すこと
+                        （中身の高さは ScrollViewer.ExtentHeight で分かる）。
+                        最小サイズではリサイズ行が折り返して伸びるため、スクロールは残る。
+                    -->
+                    <ScrollViewer MaxHeight="240"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
@@ -314,6 +323,63 @@
                                                      Maximum="{x:Static models:BrightnessOption.MaxValue}"
                                                      IsEnabled="{Binding Settings.Brightness.Enabled}"
                                                      Value="{Binding Settings.Brightness.Value}" />
+                        </Grid>
+
+                        <!-- 明るさと同じ 1 本の LUT にまとめて適用される -->
+                        <Grid Style="{StaticResource AdjustmentRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <CheckBox Grid.Column="0"
+                                      Content="コントラスト"
+                                      MinWidth="92"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.Contrast.Enabled}" />
+
+                            <Slider Grid.Column="1"
+                                    Style="{StaticResource AdjustmentSliderStyle}"
+                                    Minimum="{Binding Source={x:Static models:ContrastOption.MinValue}, Mode=OneTime}"
+                                    Maximum="{Binding Source={x:Static models:ContrastOption.MaxValue}, Mode=OneTime}"
+                                    IsEnabled="{Binding Settings.Contrast.Enabled}"
+                                    Value="{Binding Settings.Contrast.Value}" />
+
+                            <controls:NumericSpinner Grid.Column="2"
+                                                     VerticalAlignment="Center"
+                                                     Minimum="{x:Static models:ContrastOption.MinValue}"
+                                                     Maximum="{x:Static models:ContrastOption.MaxValue}"
+                                                     IsEnabled="{Binding Settings.Contrast.Enabled}"
+                                                     Value="{Binding Settings.Contrast.Value}" />
+                        </Grid>
+
+                        <Grid Style="{StaticResource AdjustmentRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <CheckBox Grid.Column="0"
+                                      Content="彩度"
+                                      MinWidth="92"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.Saturation.Enabled}" />
+
+                            <Slider Grid.Column="1"
+                                    Style="{StaticResource AdjustmentSliderStyle}"
+                                    Minimum="{Binding Source={x:Static models:SaturationOption.MinValue}, Mode=OneTime}"
+                                    Maximum="{Binding Source={x:Static models:SaturationOption.MaxValue}, Mode=OneTime}"
+                                    IsEnabled="{Binding Settings.Saturation.Enabled}"
+                                    Value="{Binding Settings.Saturation.Value}" />
+
+                            <controls:NumericSpinner Grid.Column="2"
+                                                     VerticalAlignment="Center"
+                                                     Minimum="{x:Static models:SaturationOption.MinValue}"
+                                                     Maximum="{x:Static models:SaturationOption.MaxValue}"
+                                                     IsEnabled="{Binding Settings.Saturation.Enabled}"
+                                                     Value="{Binding Settings.Saturation.Value}" />
                         </Grid>
                     </StackPanel>
                     </ScrollViewer>

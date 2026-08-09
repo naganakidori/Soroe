@@ -321,8 +321,8 @@ public sealed class ImageRenderer : IImageRenderer
     /// 6. 二値化 / 7. シャープ / 8. 枠線。
     /// </para>
     /// <para>
-    /// 現時点で実装しているのは 2. リサイズと 3. 明るさの 2 つ。
-    /// 残る 6 項目はこのメソッドに順番どおり挿入していく。
+    /// 現時点で実装しているのは 2. リサイズ、3. 明るさ / コントラスト、4. 彩度。
+    /// 残る 4 項目はこのメソッドに順番どおり挿入していく。
     /// </para>
     /// <para>
     /// 寸法に関わる調整（2. リサイズ、8. 枠線の太さ）は、まず元画像に対する出力寸法を
@@ -358,35 +358,89 @@ public sealed class ImageRenderer : IImageRenderer
             }
         }
 
-        // 3. 明るさ
-        if (settings.Brightness.Enabled && settings.Brightness.Value != 0)
+        // 3. 明るさ / コントラスト（1 本の LUT にまとめて 1 回で通す）
+        var brightness = settings.Brightness.Enabled ? settings.Brightness.Value : 0;
+        var contrast = settings.Contrast.Enabled ? settings.Contrast.Value : 0;
+        if (brightness != 0 || contrast != 0)
         {
-            using var lut = BuildBrightnessLut(settings.Brightness.Value);
+            using var lut = BuildToneLut(brightness, contrast);
             var adjusted = new Mat();
             Cv2.LUT(result, lut, adjusted);
             result.Dispose();
             result = adjusted;
         }
 
+        // 4. 彩度
+        if (settings.Saturation.Enabled && settings.Saturation.Value != 0)
+        {
+            var saturated = ApplySaturation(result, settings.Saturation.Value);
+            result.Dispose();
+            result = saturated;
+        }
+
         return result;
     }
 
     /// <summary>
-    /// 明るさ変換の対応表を作る。
+    /// 明るさとコントラストをまとめた対応表を作る。
     /// </summary>
     /// <remarks>
-    /// 画素ごとに加算すると 1 画素あたり何度も計算が走るため、0〜255 の変換表を
-    /// 1 度だけ作って <c>Cv2.LUT</c> で一括変換する。後でコントラストを足すときも、
-    /// 同じ表に畳み込めば走査は 1 回で済む。
+    /// 画素ごとに計算すると 1 画素あたり何度も走るため、0〜255 の変換表を 1 度だけ作って
+    /// <c>Cv2.LUT</c> で一括変換する。<b>2 つを別々の LUT で通さないこと。</b>
+    /// 中間で 2 度丸めが入り、階調がわずかに崩れる。
+    /// <para>
+    /// <b>コントラストを先に、明るさを後に</b>掛ける。逆にすると明るさの効きが
+    /// コントラストの倍率だけ増減し、「コントラストを上げたら明るさスライダーの
+    /// 効き方まで変わった」という挙動になる。この順なら明るさは常にちょうど
+    /// <paramref name="brightness" /> だけ動く。
+    /// </para>
+    /// <para>
+    /// 中心は 128 ではなく 127.5。0 と 255 が対称に動くようにするため。
+    /// </para>
     /// </remarks>
-    private static Mat BuildBrightnessLut(int value)
+    /// <param name="brightness">加算する量（-100〜100）。0 で変化なし。</param>
+    /// <param name="contrast">コントラストの強さ（-100〜100）。0 で変化なし。</param>
+    private static Mat BuildToneLut(int brightness, int contrast)
     {
+        const double center = 127.5;
+        var scale = 1.0 + (contrast / 100.0);
+
         var lut = new Mat(1, 256, MatType.CV_8UC1);
         for (var i = 0; i < 256; i++)
         {
-            lut.Set(0, i, (byte)Math.Clamp(i + value, 0, 255));
+            var value = ((i - center) * scale) + center + brightness;
+            lut.Set(0, i, (byte)Math.Clamp(Math.Round(value), 0, 255));
         }
 
         return lut;
+    }
+
+    /// <summary>
+    /// 彩度を適用した結果を新しい <see cref="Mat" /> として返す。
+    /// </summary>
+    /// <remarks>
+    /// HSV や Lab へは変換しない。8bit で色空間を往復すると、量子化のせいで
+    /// それだけで画素が変わってしまう。ここでは<b>輝度との線形補間</b>で済ませる。
+    /// <para>
+    /// 倍率 0（値 -100）の結果は <c>BGR2GRAY</c> と完全に一致する。後から入る
+    /// グレースケールと地続きになり、「彩度 -100」と「グレースケール ON」で
+    /// 違う絵が出るという食い違いが起きない。
+    /// </para>
+    /// </remarks>
+    private static Mat ApplySaturation(Mat source, int value)
+    {
+        var scale = 1.0 + (value / 100.0);
+
+        // プレビューは操作のたびに走る。ここで破棄を漏らすとネイティブメモリが増え続ける
+        using var gray = new Mat();
+        Cv2.CvtColor(source, gray, ColorConversionCodes.BGR2GRAY);
+
+        using var gray3 = new Mat();
+        Cv2.CvtColor(gray, gray3, ColorConversionCodes.GRAY2BGR);
+
+        // 出力 = 元の色 × scale + グレー × (1 - scale)。飽和は OpenCV 側が行う
+        var result = new Mat();
+        Cv2.AddWeighted(source, scale, gray3, 1.0 - scale, 0.0, result);
+        return result;
     }
 }
