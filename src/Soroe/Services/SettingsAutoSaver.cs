@@ -15,6 +15,12 @@ namespace Soroe.Services;
 /// かといって変更のたびに書くと、スライダーを動かしている間ずっとディスクに
 /// 書き続けることになる。最後の変更から少し待ってまとめて書く。
 /// </para>
+/// <para>
+/// <b>書き込みは UI スレッドで行わない。</b>合図は <see cref="DispatcherTimer" /> で
+/// 受けるが、そこで直接書くと、多重起動時の置き換えの取り合いで入る再試行の待ちが
+/// そのまま画面の固まりになる。実測では通常 0.5ms 未満だが、競合したときは 200ms を
+/// 超えることがあった。値の写しだけ UI スレッドで取り、書き込みは投げる。
+/// </para>
 /// </remarks>
 public sealed class SettingsAutoSaver : IDisposable
 {
@@ -25,6 +31,22 @@ public sealed class SettingsAutoSaver : IDisposable
     private readonly ProcessingSettings _processing;
     private readonly ExportSettings _export;
     private readonly DispatcherTimer _timer;
+
+    /// <summary>
+    /// 書き込みを 1 度に 1 つだけに制限する。
+    /// </summary>
+    /// <remarks>
+    /// 一時ファイルのパスは <see cref="SettingsStore" /> ごとに 1 つなので、
+    /// 同じプロセスの中で重ねて書くとそこで取り合いになる。
+    /// <para>
+    /// あえて <c>Dispose</c> しない。終了時の保存が待っている裏で片付けると、
+    /// 解放済みのものを触ることになる。プロセスが終わるだけなので実害はない。
+    /// </para>
+    /// </remarks>
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+
+    /// <summary>保存要求の番号。新しい要求が来た時点で古い写しは用済みになる。</summary>
+    private int _saveVersion;
 
     /// <summary>
     /// <see cref="SettingsAutoSaver" /> の新しいインスタンスを生成する。
@@ -66,16 +88,37 @@ public sealed class SettingsAutoSaver : IDisposable
     public event EventHandler? SaveRequested;
 
     /// <summary>
-    /// 待たずにいま保存する。
+    /// 待たずにいま保存する。書き終わるまで戻らない。
     /// </summary>
     /// <remarks>
     /// 終了時に呼ぶ。待機中の変更を取りこぼさないための締めであって、
     /// これだけで足りるという意味ではない。
+    /// <para>
+    /// <b>ここだけは同期で書く。</b>終了処理の途中でバックグラウンドへ投げても、
+    /// 書き終わる前にプロセスが消えることがある。UI スレッドを塞ぐが、
+    /// 塞ぐ相手はもう閉じようとしている画面である。
+    /// </para>
     /// </remarks>
     public void SaveNow()
     {
         _timer.Stop();
-        _store.Save(_processing, _export);
+
+        // 番号を進めて、順番待ちしているバックグラウンドの保存を無効にする。
+        // 待たせたまま古い写しで上書きされてはいけない
+        Interlocked.Increment(ref _saveVersion);
+        var snapshot = _store.Capture(_processing, _export);
+
+        // 書いている最中のものがあれば終わるまで待つ。掴んでいるのは
+        // スレッドプールの側で、UI スレッドを必要としないので詰まらない
+        _writeGate.Wait();
+        try
+        {
+            _store.Write(snapshot);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -87,7 +130,49 @@ public sealed class SettingsAutoSaver : IDisposable
         _export.PropertyChanged -= OnChanged;
     }
 
-    private void OnTick(object? sender, EventArgs e) => SaveNow();
+    private void OnTick(object? sender, EventArgs e)
+    {
+        _timer.Stop();
+        _ = SaveInBackgroundAsync();
+    }
+
+    /// <summary>
+    /// 写しを取ってから、書き込みだけをバックグラウンドで行う。
+    /// </summary>
+    /// <remarks>
+    /// 写しを取るのは <c>Task.Run</c> の前、つまり UI スレッド。設定を編集しているのと
+    /// 同じスレッドで固定しないと、書いている最中に画面側が値を変える競合になる。
+    /// <para>
+    /// <b>順番待ちごと <see cref="Task.Run(Action)" /> の中へ入れること。</b>
+    /// <c>await _writeGate.WaitAsync().ConfigureAwait(false)</c> と書くと、待たずに
+    /// 通れた場合に <c>await</c> がそのまま同期で続き、書き込みが UI スレッドに残る。
+    /// <c>ConfigureAwait(false)</c> が効くのは実際に中断したときだけである。
+    /// </para>
+    /// </remarks>
+    private async Task SaveInBackgroundAsync()
+    {
+        var version = Interlocked.Increment(ref _saveVersion);
+        var snapshot = _store.Capture(_processing, _export);
+
+        await Task.Run(() =>
+        {
+            _writeGate.Wait();
+            try
+            {
+                // 待っている間に新しい要求が来ていたら、この写しはもう古い
+                if (Volatile.Read(ref _saveVersion) != version)
+                {
+                    return;
+                }
+
+                _store.Write(snapshot);
+            }
+            finally
+            {
+                _writeGate.Release();
+            }
+        }).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// 変更を受けて、保存までの待ち時間を計り直す。

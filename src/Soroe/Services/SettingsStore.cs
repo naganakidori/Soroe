@@ -155,17 +155,39 @@ public sealed class SettingsStore
     /// </para>
     /// </remarks>
     public bool Save(ProcessingSettings processing, ExportSettings export)
+        => Write(Capture(processing, export));
+
+    /// <summary>
+    /// いまの設定の写しを取る。
+    /// </summary>
+    /// <remarks>
+    /// <b>必ず設定を編集している側のスレッド（UI スレッド）で呼ぶこと。</b>
+    /// 書き出しはバックグラウンドで行うため、その最中に画面側が値を変えても
+    /// 影響が出ないよう、ここで値を固定する。レンダリングや書き出しと同じ考え方。
+    /// </remarks>
+    public StoredSettings Capture(ProcessingSettings processing, ExportSettings export) => new()
+    {
+        SchemaVersion = CurrentSchemaVersion,
+        Processing = processing.Clone(),
+        Export = export.Clone(),
+    };
+
+    /// <summary>
+    /// 写しをファイルへ書き出す。
+    /// </summary>
+    /// <returns>保存できた場合は <see langword="true" />。</returns>
+    /// <remarks>
+    /// スレッドは問わないが、<b>同じ <see cref="SettingsStore" /> に対して同時に呼ばないこと</b>。
+    /// 一時ファイルのパスはインスタンスごとに 1 つなので、重なると取り合いになる。
+    /// <para>
+    /// 保存しない項目を落とすのはここで行う。書き出す経路が 1 つになるので、
+    /// どこから呼んでも除外が効く（原則 2 に関わるため、抜け道を作らない）。
+    /// </para>
+    /// </remarks>
+    public bool Write(StoredSettings stored)
     {
         try
         {
-            // 除外項目を既定に戻した写しを書き出す。元の設定は触らない
-            var stored = new StoredSettings
-            {
-                SchemaVersion = CurrentSchemaVersion,
-                Processing = processing.Clone(),
-                Export = export.Clone(),
-            };
-
             ResetNotSaved(stored.Export);
             var json = JsonSerializer.Serialize(stored, Options);
 
