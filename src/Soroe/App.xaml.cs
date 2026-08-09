@@ -21,7 +21,7 @@ public partial class App : Application
         var store = new SettingsStore();
         var stored = store.Load();
 
-        // StartupUri ではなくここで組み立てるのは、ViewModel に依存（IImageLoader）を注入するため。
+        // StartupUri ではなくここで組み立てるのは、ViewModel に依存（IImageRenderer など）を注入するため。
         // DI コンテナを導入するほどの規模ではないので、実装の差し替え口だけを用意しておく。
         var renderer = new ImageRenderer();
         var window = new MainWindow
