@@ -22,6 +22,10 @@
         横に広げられるようにしている。出力パスが長いと 1 行に収まらないため。
         SizeToContent は使わない。WrapPanel の折り返しで高さが動く一方、
         縦のリサイズだけ効かないウィンドウになって挙動が不自然になる。
+
+        書き出しの実行中もリサイズを許す。失敗一覧が伸びるため、
+        止められると失敗の全体が見えなくなる。
+        なお実行中は「実行」ボタン自体を無効化して二重実行を防いでいる。
     -->
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
