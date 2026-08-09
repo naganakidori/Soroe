@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows.Threading;
+using Soroe.Common;
 using Soroe.Models;
 
 namespace Soroe.Services;
@@ -27,10 +28,22 @@ public sealed class SettingsAutoSaver : IDisposable
     /// <summary>最後の変更から保存までの待ち時間。</summary>
     private static readonly TimeSpan SaveDelay = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// 終了時に保存を待つ上限。
+    /// </summary>
+    /// <remarks>
+    /// 書き込み先は exe と同じ場所なので普通は一瞬で終わるが、ネットワーク共有や
+    /// 遅い USB メモリに置いて起動されることはありうる。上限が無いと、そこで
+    /// アプリが閉じられなくなる。<b>設定が保存されることより、確実に終了することを
+    /// 優先する</b>。走っている保存の完了待ちと自分の書き込みを合わせてこの時間まで。
+    /// </remarks>
+    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromMilliseconds(500);
+
     private readonly SettingsStore _store;
     private readonly ProcessingSettings _processing;
     private readonly ExportSettings _export;
     private readonly DispatcherTimer _timer;
+    private readonly TimeSpan _shutdownTimeout;
 
     /// <summary>
     /// 書き込みを 1 度に 1 つだけに制限する。
@@ -48,6 +61,8 @@ public sealed class SettingsAutoSaver : IDisposable
     /// <summary>保存要求の番号。新しい要求が来た時点で古い写しは用済みになる。</summary>
     private int _saveVersion;
 
+    private int _discardedSaves;
+
     /// <summary>
     /// <see cref="SettingsAutoSaver" /> の新しいインスタンスを生成する。
     /// </summary>
@@ -57,15 +72,20 @@ public sealed class SettingsAutoSaver : IDisposable
     /// <param name="saveDelay">
     /// 最後の変更から保存までの待ち時間。省略すると既定値になる。
     /// </param>
+    /// <param name="shutdownTimeout">
+    /// 終了時に保存を待つ上限。省略すると既定値になる。
+    /// </param>
     public SettingsAutoSaver(
         SettingsStore store,
         ProcessingSettings processing,
         ExportSettings export,
-        TimeSpan? saveDelay = null)
+        TimeSpan? saveDelay = null,
+        TimeSpan? shutdownTimeout = null)
     {
         _store = store;
         _processing = processing;
         _export = export;
+        _shutdownTimeout = shutdownTimeout ?? ShutdownTimeout;
 
         _timer = new DispatcherTimer { Interval = saveDelay ?? SaveDelay };
         _timer.Tick += OnTick;
@@ -88,18 +108,34 @@ public sealed class SettingsAutoSaver : IDisposable
     public event EventHandler? SaveRequested;
 
     /// <summary>
-    /// 待たずにいま保存する。書き終わるまで戻らない。
+    /// 古くなった写しを、書かずに捨てた回数。
     /// </summary>
+    /// <remarks>
+    /// 写しを取る順序と書き込む順序が入れ替わると、直前の変更が巻き戻り、その後は
+    /// 変更が起きないので巻き戻ったまま確定する。それを防ぐのが版番号による最新優先で、
+    /// これはその仕組みが実際に働いたかを外から確かめるために持つ。
+    /// <para>
+    /// <b>結果（最後の値）を見るだけのテストでは足りない。</b>順序の入れ替わり自体が
+    /// めったに起きないため、仕組みを外しても最後の値は正しいままになる（実測で確認済み）。
+    /// </para>
+    /// </remarks>
+    public int DiscardedSaves => Volatile.Read(ref _discardedSaves);
+
+    /// <summary>
+    /// 待たずにいま保存する。書き終わるか、上限に達するまで戻らない。
+    /// </summary>
+    /// <returns>書き終わった場合は <see langword="true" />。上限で諦めた場合は <see langword="false" />。</returns>
     /// <remarks>
     /// 終了時に呼ぶ。待機中の変更を取りこぼさないための締めであって、
     /// これだけで足りるという意味ではない。
     /// <para>
-    /// <b>ここだけは同期で書く。</b>終了処理の途中でバックグラウンドへ投げても、
-    /// 書き終わる前にプロセスが消えることがある。UI スレッドを塞ぐが、
-    /// 塞ぐ相手はもう閉じようとしている画面である。
+    /// <b>投げっぱなしにはしない。</b>終了処理の途中でバックグラウンドへ投げると、
+    /// 書き終わる前にプロセスが消えることがある。かといって無制限に待つと、
+    /// 遅い場所に置かれた exe ではアプリが閉じられなくなる。
+    /// <see cref="ShutdownTimeout" /> まで待って、超えたら諦める。
     /// </para>
     /// </remarks>
-    public void SaveNow()
+    public bool SaveNow()
     {
         _timer.Stop();
 
@@ -108,17 +144,33 @@ public sealed class SettingsAutoSaver : IDisposable
         Interlocked.Increment(ref _saveVersion);
         var snapshot = _store.Capture(_processing, _export);
 
-        // 書いている最中のものがあれば終わるまで待つ。掴んでいるのは
-        // スレッドプールの側で、UI スレッドを必要としないので詰まらない
-        _writeGate.Wait();
-        try
+        // 順番待ちも書き込みもバックグラウンドへ置き、こちらは待つだけにする。
+        // こうしないと上限を掛けられない（掛けられるのは待ち時間だけになり、
+        // 書き込み自体が長引いた場合に効かない）
+        var write = Task.Run(() =>
         {
-            _store.Write(snapshot);
-        }
-        finally
+            _writeGate.Wait();
+            try
+            {
+                _store.Write(snapshot);
+            }
+            finally
+            {
+                _writeGate.Release();
+            }
+        });
+
+        if (write.Wait(_shutdownTimeout))
         {
-            _writeGate.Release();
+            return true;
         }
+
+        // 諦めても書き込み自体は続くが、プロセスが終われば道連れになる。
+        // 中途半端な一時ファイルが残りうるので、次の起動時に片付ける
+        FileErrorMessage.Log(
+            "設定の保存",
+            new TimeoutException($"{_shutdownTimeout.TotalMilliseconds:F0}ms で終わらなかったため諦めた"));
+        return false;
     }
 
     /// <inheritdoc />
@@ -159,9 +211,11 @@ public sealed class SettingsAutoSaver : IDisposable
             _writeGate.Wait();
             try
             {
-                // 待っている間に新しい要求が来ていたら、この写しはもう古い
+                // 待っている間に新しい要求が来ていたら、この写しはもう古い。
+                // ここで書くと、直前の変更が巻き戻ったまま確定してしまう
                 if (Volatile.Read(ref _saveVersion) != version)
                 {
+                    Interlocked.Increment(ref _discardedSaves);
                     return;
                 }
 

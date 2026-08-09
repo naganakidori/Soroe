@@ -141,6 +141,51 @@ public sealed class SettingsStore
             FileErrorMessage.Log($"設定の読み込み {_path}", ex);
             return new StoredSettings();
         }
+        finally
+        {
+            CleanStaleTempFiles();
+        }
+    }
+
+    /// <summary>
+    /// 置き去りになった一時ファイルを片付ける。
+    /// </summary>
+    /// <remarks>
+    /// 終了時の保存は上限で打ち切ることがあり、その場合は書きかけの一時ファイルが残る。
+    /// zip を解凍して置くだけの配布形態なので、exe の隣にごみが溜まっていくのは避けたい。
+    /// <para>
+    /// 動いている他のインスタンスの一時ファイルは掴まれているため削除に失敗する。
+    /// 失敗は無視するので、消えるのは本当に置き去りのものだけになる。
+    /// </para>
+    /// </remarks>
+    private void CleanStaleTempFiles()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(_path);
+            if (directory is null)
+            {
+                return;
+            }
+
+            foreach (var path in Directory.EnumerateFiles(
+                directory, $"{Path.GetFileName(_path)}.*{TempExtension}"))
+            {
+                try
+                {
+                    File.Delete(path);
+                }
+                catch (Exception ex) when (IsContention(ex))
+                {
+                    // 他のインスタンスが使っている。触らないのが正しい
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // 片付けに失敗しても起動は妨げない
+            FileErrorMessage.Log("一時ファイルの片付け", ex);
+        }
     }
 
     /// <summary>
