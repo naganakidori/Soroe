@@ -212,7 +212,13 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0">
+                <!--
+                    見積もりと結果は排他にする。見積もりは「今の設定でもう一度押したら
+                    こうなる」という予告であって、直前の実行結果ではない。
+                    並べると結果の報告と読み違える。
+                -->
+                <StackPanel Grid.Row="0"
+                            Visibility="{Binding ShowEstimate, Converter={StaticResource BoolToVisibility}}">
                     <TextBlock Text="{Binding OutputPathPreview}"
                                ToolTip="{Binding OutputPathTooltip}"
                                TextTrimming="CharacterEllipsis" />

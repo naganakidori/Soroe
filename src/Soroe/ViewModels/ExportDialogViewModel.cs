@@ -71,6 +71,10 @@ public sealed partial class ExportDialogViewModel : ObservableObject
 
         Output.PropertyChanged += (_, _) =>
         {
+            // 設定が変わった時点で、直前の結果はもう今の設定の話ではない。
+            // 見積もりの表示に戻す
+            ClearResult();
+            RecheckNotice = string.Empty;
             RunCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(ShowJpegQuality));
             OnPropertyChanged(nameof(ShowWebPQuality));
@@ -195,7 +199,21 @@ public sealed partial class ExportDialogViewModel : ObservableObject
 
     /// <summary>完了後に出す結果の 1 行。実行前は空。</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowEstimate))]
+    [NotifyPropertyChangedFor(nameof(ShowResult))]
     public partial string ResultMessage { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 見積もりを出すかどうか。
+    /// </summary>
+    /// <remarks>
+    /// 見積もりは「今の設定でもう一度押したらこうなる」という予告であり、
+    /// 直前の実行結果ではない。両方を並べると、結果の報告と読み違える。
+    /// </remarks>
+    public bool ShowEstimate => ResultMessage.Length == 0;
+
+    /// <summary>結果を出すかどうか。見積もりとは排他。</summary>
+    public bool ShowResult => ResultMessage.Length > 0;
 
     /// <summary>
     /// 直前の書き出しで失敗したファイルの一覧。
@@ -241,9 +259,15 @@ public sealed partial class ExportDialogViewModel : ObservableObject
         RecheckNotice = string.Empty;
 
         // 表示している件数が古いまま実行してはいけない。この件数は単なる情報ではなく、
-        // 「うち 3 件を上書き」という最後の確認そのものだから。押した時点で確定させる
-        var shown = _plan;
+        // 「うち 3 件を上書き」という最後の確認そのものだから。押した時点で確定させる。
+        //
+        // 結果を出している間は見積もりを隠しているので、その状態で押されたということは
+        // 予告を見せていないことになる。見た内容が無いものとして扱う
+        var shown = ShowEstimate ? _plan : null;
         var confirmed = await ConfirmPlanAsync().ConfigureAwait(true);
+
+        // 結果を消して見積もりに戻す。以降の案内は見積もりと並べて読ませる
+        ClearResult();
 
         // ただし見送るのは「確認が要る内容」を含むときだけ。上書きも全件スキップも
         // 無い見積もりなら、確認すべきものが無いのでそのまま進めてよい。
@@ -269,9 +293,6 @@ public sealed partial class ExportDialogViewModel : ObservableObject
         var exportSettings = Output.Clone();
         var processing = _processing.Clone();
 
-        ExportFailures.Clear();
-        _lastFailures = [];
-        ResultMessage = string.Empty;
         ExportCompleted = 0;
         ExportTotal = _sourcePaths.Count;
         ExportingSourceName = string.Empty;
@@ -457,6 +478,16 @@ public sealed partial class ExportDialogViewModel : ObservableObject
     /// その見積もりに、実行前の確認が要る内容が含まれるか。
     /// </summary>
     private static bool NeedsConfirmation(ExportPlan plan) => plan.OverwriteCount > 0 || plan.IsAllSkipped;
+
+    /// <summary>
+    /// 直前の実行結果の表示を消し、見積もりの表示に戻す。
+    /// </summary>
+    private void ClearResult()
+    {
+        ResultMessage = string.Empty;
+        ExportFailures.Clear();
+        _lastFailures = [];
+    }
 
     /// <summary>
     /// 実行の直前に見積もりを確定させる。
