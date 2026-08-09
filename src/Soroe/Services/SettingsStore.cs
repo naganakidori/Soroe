@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -74,6 +75,18 @@ public sealed class SettingsStore
 
     /// <summary>再試行までの待ち時間（ミリ秒）。試すたびに伸ばす。</summary>
     private const int RetryDelayMs = 20;
+
+    /// <summary>
+    /// 一時ファイルを置き去りとみなすまでの時間。
+    /// </summary>
+    /// <remarks>
+    /// 保存 1 回は数ミリ秒で終わるので、これだけ開けておけば書いている最中のものに
+    /// 当たることはない。長めに取っても、消し損ねたごみが次の起動まで残るだけである。
+    /// </remarks>
+    private static readonly TimeSpan StaleAfter = TimeSpan.FromHours(1);
+
+    /// <summary>自分のプロセス名。一時ファイルの持ち主を判定するのに使う。</summary>
+    private static readonly string CurrentProcessName = Process.GetCurrentProcess().ProcessName;
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -154,8 +167,10 @@ public sealed class SettingsStore
     /// 終了時の保存は上限で打ち切ることがあり、その場合は書きかけの一時ファイルが残る。
     /// zip を解凍して置くだけの配布形態なので、exe の隣にごみが溜まっていくのは避けたい。
     /// <para>
-    /// 動いている他のインスタンスの一時ファイルは掴まれているため削除に失敗する。
-    /// 失敗は無視するので、消えるのは本当に置き去りのものだけになる。
+    /// <b>「掴まれていないから消してよい」とは判断できない。</b>一時ファイルは
+    /// 書き終えてから <c>File.Move</c> するまでの一瞬、誰にも掴まれていない。
+    /// その瞬間に別のインスタンスが起動すると、まだ有効なものを消してしまい、
+    /// 相手の保存が 1 回分失われる。<see cref="IsStale" /> で二重に確かめる。
     /// </para>
     /// </remarks>
     private void CleanStaleTempFiles()
@@ -171,6 +186,11 @@ public sealed class SettingsStore
             foreach (var path in Directory.EnumerateFiles(
                 directory, $"{Path.GetFileName(_path)}.*{TempExtension}"))
             {
+                if (!IsStale(path))
+                {
+                    continue;
+                }
+
                 try
                 {
                     File.Delete(path);
@@ -185,6 +205,71 @@ public sealed class SettingsStore
         {
             // 片付けに失敗しても起動は妨げない
             FileErrorMessage.Log("一時ファイルの片付け", ex);
+        }
+    }
+
+    /// <summary>
+    /// その一時ファイルが置き去りかどうか。
+    /// </summary>
+    /// <remarks>
+    /// 条件を 2 つとも満たすものだけを消す。<b>迷ったら消さない側に倒す。</b>
+    /// 消し損ねても数百バイトのごみが次の起動まで残るだけだが、消し間違えると
+    /// 動いているインスタンスの保存が失われる。損得が釣り合っていない。
+    /// <list type="number">
+    /// <item>名前の PID が、動いている同名のプロセスに該当しないこと</item>
+    /// <item>十分に古いこと。PID は使い回されるため、1 つ目だけでは足りない</item>
+    /// </list>
+    /// </remarks>
+    private static bool IsStale(string path)
+    {
+        if (IsOwnerRunning(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            return DateTime.UtcNow - File.GetLastWriteTimeUtc(path) > StaleAfter;
+        }
+        catch (Exception ex) when (IsContention(ex))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 一時ファイルを書いたインスタンスがまだ動いているか。
+    /// </summary>
+    /// <remarks>
+    /// 名前を読めない場合や、調べられない場合は <see langword="true" />（消さない）を返す。
+    /// </remarks>
+    private static bool IsOwnerRunning(string path)
+    {
+        // settings.json.<pid>.soroe-tmp から PID を取り出す
+        var name = Path.GetFileNameWithoutExtension(path);
+        var separator = name.LastIndexOf('.');
+        if (separator < 0 || !int.TryParse(name[(separator + 1)..], out var processId))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+
+            // PID は使い回されるので、同じ名前のプロセスかどうかまで見る。
+            // 無関係のプロセスに当たった場合は、古さの判定のほうで拾う
+            return string.Equals(process.ProcessName, CurrentProcessName, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            // その PID のプロセスは存在しない
+            return false;
+        }
+        catch (Exception)
+        {
+            // 調べられないなら消さない
+            return true;
         }
     }
 
