@@ -32,18 +32,38 @@ public sealed class SettingsAutoSaver : IDisposable
     /// <param name="store">保存先。</param>
     /// <param name="processing">監視する調整の設定。</param>
     /// <param name="export">監視する書き出しの設定。</param>
-    public SettingsAutoSaver(SettingsStore store, ProcessingSettings processing, ExportSettings export)
+    /// <param name="saveDelay">
+    /// 最後の変更から保存までの待ち時間。省略すると既定値になる。
+    /// </param>
+    public SettingsAutoSaver(
+        SettingsStore store,
+        ProcessingSettings processing,
+        ExportSettings export,
+        TimeSpan? saveDelay = null)
     {
         _store = store;
         _processing = processing;
         _export = export;
 
-        _timer = new DispatcherTimer { Interval = SaveDelay };
+        _timer = new DispatcherTimer { Interval = saveDelay ?? SaveDelay };
         _timer.Tick += OnTick;
 
         _processing.Changed += OnChanged;
         _export.PropertyChanged += OnChanged;
     }
+
+    /// <summary>
+    /// 保存が必要になったことを検知したときに発生する。
+    /// </summary>
+    /// <remarks>
+    /// 実際に書き出すのはこの後の待ち時間が過ぎてからで、ここでは保存を予約しただけである。
+    /// <para>
+    /// これを外へ出しているのは、<b>どの設定項目が保存の引き金になるかを検証できるようにする</b>ため。
+    /// 保存されるかどうかは購読しているイベントの網羅性に依存しており、入れ子の項目が増えたときに
+    /// 通知が上がらなくなっても、値の往復を見るテストは通ったままになる。
+    /// </para>
+    /// </remarks>
+    public event EventHandler? SaveRequested;
 
     /// <summary>
     /// 待たずにいま保存する。
@@ -80,5 +100,6 @@ public sealed class SettingsAutoSaver : IDisposable
     {
         _timer.Stop();
         _timer.Start();
+        SaveRequested?.Invoke(this, EventArgs.Empty);
     }
 }

@@ -268,7 +268,4 @@ public sealed class ImageExporter : IImageExporter
             return $"出力先に書き込めません: {FileErrorMessage.Describe(ex, probePath)}";
         }
     }
-
-    private static bool IsSamePath(string a, string b)
-        => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 }

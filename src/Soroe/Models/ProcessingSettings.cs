@@ -23,6 +23,8 @@ namespace Soroe.Models;
 [JsonObjectCreationHandling(JsonObjectCreationHandling.Populate)]
 public sealed class ProcessingSettings
 {
+    private int _schemaVersion = 1;
+
     /// <summary>
     /// <see cref="ProcessingSettings" /> の新しいインスタンスを生成する。
     /// </summary>
@@ -42,7 +44,25 @@ public sealed class ProcessingSettings
     /// <summary>
     /// 設定の版。項目を変更したときに、古いプリセットを分岐処理するために使う。
     /// </summary>
-    public int SchemaVersion { get; set; } = 1;
+    /// <remarks>
+    /// 自動保存の対象である以上、変えたら <see cref="Changed" /> が上がらなければならない。
+    /// 通知しない保存対象を 1 つでも作ると、「変更しても保存されない」項目が生まれ、
+    /// しかも往復のテストは通ったままになる。
+    /// </remarks>
+    public int SchemaVersion
+    {
+        get => _schemaVersion;
+        set
+        {
+            if (_schemaVersion == value)
+            {
+                return;
+            }
+
+            _schemaVersion = value;
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+    }
 
     /// <summary>リサイズ（適用順序 2 番目）。</summary>
     public ResizeOption Resize { get; } = new();
