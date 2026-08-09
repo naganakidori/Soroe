@@ -29,7 +29,7 @@
     -->
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
-        <converters:WidthFractionConverter x:Key="WidthFraction" />
+        <converters:FractionConverter x:Key="WidthFraction" Minimum="80" />
     </Window.Resources>
 
     <Grid Margin="16">

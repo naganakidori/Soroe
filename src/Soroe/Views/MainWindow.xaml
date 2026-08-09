@@ -19,7 +19,15 @@
         Drop="OnDrop">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
-        <converters:WidthFractionConverter x:Key="WidthFraction" />
+        <converters:FractionConverter x:Key="WidthFraction" Minimum="80" />
+
+        <!--
+            調整パネルの高さの上限。プレビューと縦を分け合わせるために、
+            固定値ではなく右側の列の高さに対する割合で決める。
+            下限は 140（見出し + 2 行程度）。ここを下回るくらい窓が低いときは、
+            プレビューを削ってでも調整パネルを見せる。
+        -->
+        <converters:FractionConverter x:Key="PanelHeightFraction" Minimum="140" />
 
         <!-- 調整パネルの分類見出し。3 分類で共通に使う -->
         <Style x:Key="SectionHeaderStyle" TargetType="TextBlock">
@@ -135,7 +143,7 @@
                           Background="Transparent" />
 
             <!-- 上がプレビュー、下が調整パネル -->
-            <Grid Grid.Column="2">
+            <Grid Grid.Column="2" x:Name="PreviewAndPanel">
                 <Grid.RowDefinitions>
                     <!--
                         プレビュー側に MinHeight を置かないこと。Auto 行は場所が足りなくても
@@ -209,16 +217,19 @@
                         </Style>
                     </Border.Style>
                     <!--
-                        項目が増えても縦に伸び続けないよう、上限を決めて中でスクロールさせる。
-                        プレビューは残りをもらう側なので、ここを上げるとプレビューが縮む。
+                        項目が増えても縦に伸び続けないよう上限を設けて中でスクロールさせる。
+                        ただし固定値にはしない。固定値だと項目を足すたびに数値を測って
+                        上げ直す必要があり、気づかなければ既定サイズでも中身が切れる。
+                        実際 2 項目のときの 220 が、4 項目では足りなくなっていた。
 
-                        この値は実装済みの項目数に合わせて決めている。2 項目のときは 220 で
-                        足りていたが、4 項目で 227.9 になり、既定サイズでもスクロールが出た。
-                        既定サイズで全項目が見えることを、項目を足すたびに測り直すこと
-                        （中身の高さは ScrollViewer.ExtentHeight で分かる）。
-                        最小サイズではリサイズ行が折り返して伸びるため、スクロールは残る。
+                        右側の列（プレビュー + 調整パネル）の高さに対する割合で決める。
+                        こうすると、項目が少ないうちは中身なりの高さで収まり、
+                        増えれば頭打ちになって自然にスクロールが出る。
+                        プレビューは残りをもらう側なので、割合を上げるとプレビューが縮む。
                     -->
-                    <ScrollViewer MaxHeight="240"
+                    <ScrollViewer MaxHeight="{Binding ActualHeight, ElementName=PreviewAndPanel,
+                                              Converter={StaticResource PanelHeightFraction},
+                                              ConverterParameter=0.55}"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
