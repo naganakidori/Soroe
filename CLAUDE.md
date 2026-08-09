@@ -75,7 +75,8 @@ GIMP や Photoshop のような多機能ソフトは「起動しても何をど�
   実際に落ちることを確認してから完成とする。** 安全ガード・同一実行内の
   衝突回避・実行前の再確認・`Overwrite` を保存対象から外していることは、
   いずれも「壊れていても普段は気づけない」種類の防御であり、
-  通ったことが動いている証拠にならない
+  通ったことが動いている証拠にならない。テストの置き場は
+  `tests/Soroe.Verify`（「構成とビルド」参照）
   - このうち**実行前の再確認は表示状態（見積もりが画面に出ているか）に
     依存している**。表示まわりを変更したときは、この確認をやり直すこと。
     詳細は「安全ガード（必須）」を参照
@@ -92,6 +93,28 @@ GIMP や Photoshop のような多機能ソフトは「起動しても何をど�
 | 画像処理 | OpenCvSharp4.Windows / OpenCvSharp4.Extensions / OpenCvSharp4.WpfExtensions |
 | プラットフォーム | **x64 固定**（`<PlatformTarget>x64</PlatformTarget>`） |
 | バージョン管理 | Git |
+
+### 構成とビルド
+
+```
+Soroe.slnx
+├ src/Soroe/            アプリ本体（Models / Services / ViewModels / Views / Common）
+└ tests/Soroe.Verify/   検証ハーネス（コンソールアプリ）
+```
+
+**本体は 1 プロジェクトのまま**にする。層ごとにアセンブリを分けても、参照の向きは
+フォルダ分けと `internal` で十分に守れる。zip 解凍で動かす配布形態なので、
+配る DLL は少ないほうがよい。
+
+```bash
+dotnet run --project src/Soroe            # 実行
+dotnet run --project tests/Soroe.Verify   # 検証（全通過なら終了コード 0）
+```
+
+**変更したら必ず検証ハーネスを通すこと。** ViewModel を直接つついて確かめる形式で、
+xUnit などは使っていない（WPF の `Dispatcher` を回す検証が多く、素のコンソールアプリの
+ほうが素直に書けるため）。原則 2 に関わる箇所は、**通ることに加えて意図的に壊すと
+落ちることまで確認する**（「コーディング規約」参照）。
 
 ### 実装上の必須の注意
 
