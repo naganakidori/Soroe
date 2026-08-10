@@ -58,20 +58,17 @@ internal static class Bench
         }
 
         var photo = Path.Combine(work, "photo.png");
-        if (samplePath is not null && File.Exists(samplePath))
-        {
-            photo = Path.Combine(work, "photo" + Path.GetExtension(samplePath));
-            File.Copy(samplePath, photo);
-            Console.WriteLine($"写真の標本: {samplePath}（指定）");
-        }
-        else
+        var syntheticPhoto = samplePath is null || !File.Exists(samplePath);
+        if (syntheticPhoto)
         {
             WritePhotoLike(photo, 3000, 4000);
             Console.WriteLine("写真の標本: 合成（3000x4000）");
-            Console.WriteLine(
-                "  注意: 合成の写真は PNG の圧縮率の差を小さく見せる（実写では 1 と 6 で 4 倍以上の");
-            Console.WriteLine(
-                "  時間差が出るが、合成では 1.2 倍程度）。圧縮率の判断をやり直すときは実写を渡すこと。");
+        }
+        else
+        {
+            photo = Path.Combine(work, "photo" + Path.GetExtension(samplePath!));
+            File.Copy(samplePath!, photo);
+            Console.WriteLine($"写真の標本: {samplePath}（指定）");
         }
 
         var flat = Path.Combine(work, "flat.png");
@@ -79,15 +76,11 @@ internal static class Bench
         var shot = Path.Combine(work, "shot.png");
         WriteFlat(shot, 1500, 1080);
         Console.WriteLine("平坦の標本: 合成（3000x4000 と 1500x1080、単色面 + 細線）");
-        Console.WriteLine(
-            "  注意: 合成の平坦画像は規則的な繰り返しが多く、PNG の圧縮率 4 → 6 の利得を");
-        Console.WriteLine(
-            "  過大に見せる（実物のスクリーンショットでは 4 と 6 の差はほぼ無い）。");
 
         var renderer = new ImageRenderer();
 
         BenchFormats(renderer, photo, work);
-        BenchPngCompression(photo, flat, shot);
+        BenchPngCompression(photo, flat, shot, syntheticPhoto);
         BenchPreview(renderer, photo);
         BenchBinarize(renderer, photo, flat, work);
 
@@ -177,18 +170,34 @@ internal static class Bench
     /// 現在の値は <c>ImageRenderer</c> の中で固定している。ここを変えるときは
     /// この表を取り直すこと。
     /// </remarks>
-    private static void BenchPngCompression(string photo, string flat, string shot)
+    private static void BenchPngCompression(string photo, string flat, string shot, bool syntheticPhoto)
     {
         Console.WriteLine();
         Console.WriteLine("■ PNG の圧縮率（エンコードのみ）");
+        Console.WriteLine();
+        Console.WriteLine("  この表だけを見て圧縮率を決めないこと。合成の標本は 2 つとも偏っている。");
 
-        foreach (var (label, path) in new[]
+        // 注意は表の直前と各標本の見出しの両方に出す。
+        // 先頭にまとめて出すと、判断をやり直そうとしている人が読み飛ばし、
+        // 数字だけを見て「6 のほうが小さい」と結論する経路が残る
+        foreach (var (label, path, caveat) in new[]
                  {
-                     ("写真", photo), ("平坦 3000x4000", flat), ("平坦 1500x1080", shot),
+                     ("写真", photo, syntheticPhoto
+                         ? "合成のため圧縮率の差を過小に見せる。実写では 1 と 6 で 4 倍以上の時間差（合成は 1.2 倍程度）"
+                         : null),
+                     ("平坦 3000x4000", flat,
+                         "合成。規則的な繰り返しが多く 4 → 6 の利得を過大に見せる"),
+                     ("平坦 1500x1080", shot,
+                         "合成。実物のスクリーンショットでは 4 と 6 の差はほぼ無い（76.8KB と 75.8KB）"),
                  })
         {
             using var image = Cv2.ImDecode(File.ReadAllBytes(path), ImreadModes.Color);
+            Console.WriteLine();
             Console.WriteLine($"  {label}");
+            if (caveat is not null)
+            {
+                Console.WriteLine($"    ※ {caveat}");
+            }
 
             foreach (var level in new[] { 1, 3, 4, 6, 9 })
             {
