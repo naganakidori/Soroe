@@ -14,8 +14,16 @@ internal static class Program
     private static int _failed;
 
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
+        // 性能測定は明示的に指定したときだけ走らせる。1 分近くかかるため、
+        // 通常の検証に混ぜると検証そのものを回さなくなる
+        if (args.Contains("--bench"))
+        {
+            Bench.Run(args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)));
+            return 0;
+        }
+
         TestFileList();
         TestOrdering();
         TestRendering();

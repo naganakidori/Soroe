@@ -35,7 +35,10 @@ public sealed class ImageRenderer : IImageRenderer
     /// 変わるのはファイルサイズと圧縮にかかる時間だけであり、
     /// 「画質」として UI に出すと誤解を招くため出さない。
     /// <para>
-    /// 実測（Release、5 回の中央値、最初の 2 回は捨てる。エンコードのみ）。
+    /// 実測 2026-08-10（Release、実写 3000×4000、5 回の中央値、最初の 2 回は捨てる、
+    /// エンコードのみ）。再現は
+    /// <c>dotnet run --project tests/Soroe.Verify -c Release -- --bench 写真.jpg</c>。
+    /// <b>合成の標本では圧縮率の差が小さく出る</b>ので、判断をやり直すときは実写を渡すこと。
     /// </para>
     /// <code>
     ///                         実写 3000×4000        スクリーンショット 1500×1080
