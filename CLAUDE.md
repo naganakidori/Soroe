@@ -113,7 +113,8 @@ GIMP や Photoshop のような多機能ソフトは「起動しても何をど�
 ```
 Soroe.slnx
 ├ src/Soroe/            アプリ本体（Models / Services / ViewModels / Views / Common）
-└ tests/Soroe.Verify/   検証ハーネス（コンソールアプリ）
+├ tests/Soroe.Verify/   検証ハーネス（コンソールアプリ）
+└ tools/                作業用スクリプト（画面の撮影など）
 ```
 
 **本体は 1 プロジェクトのまま**にする。層ごとにアセンブリを分けても、参照の向きは
@@ -127,7 +128,14 @@ dotnet run --project tests/Soroe.Verify   # 検証（全通過なら終了コー
 # 性能測定。形式ごとの書き出し・PNG 圧縮率・プレビュー・二値化の増分をまとめて測る
 dotnet run --project tests/Soroe.Verify -c Release -- --bench
 dotnet run --project tests/Soroe.Verify -c Release -- --bench 写真.jpg   # 実写を使う
+
+# 画面の撮影。見た目の確認に使う（出力先は絶対パスで渡すこと）
+powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Width 1000 -Height 720
+powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Width 720 -Height 600 -ScrollEnd
 ```
+
+`-ScrollEnd` は調整パネルを末尾まで送ってから撮る。項目が増えて画面に収まらなくなったとき、
+末尾の項目まで届くかの確認に使う。**撮影の実装上の注意は「実装上の必須の注意」を参照**（`Graphics.CopyFromScreen` は使わない）。
 
 #### 性能の数字の扱い（必須）
 
@@ -138,14 +146,6 @@ dotnet run --project tests/Soroe.Verify -c Release -- --bench 写真.jpg   # 実
 - **残す数字には必ず「測定日・条件・再現コマンド」を添える。** 条件とは構成（Debug / Release）・標本（寸法と種類）・測り方（回数と中央値か）・何を含むか（エンコードのみか、読み込みから書き込みまでか）
 - **絶対値は測定した機械に依存する。文書の数字と自分の環境の数字が一致しなくても、それ自体は異常ではない。** 記録してある値は 2026-08-10 に Intel Core Ultra 5 245K / Windows 11 / Release で測ったもの。別の環境では**比率で判断すること** — PNG の圧縮率 1・4・6 の関係（4 は 1 の 1.5 倍、6 は 4 の 3 倍）、形式ごとの桁の違い（JPEG と BMP が同程度、PNG がその 10 倍、WebP がさらに倍）といった関係は環境が変わっても保たれる。`--bench` は測定環境（CPU・OS・構成）を出力の先頭に出すので、比べるときはそこを確認する
 - **`--bench` は既定では合成画像を使う**（リポジトリ外のファイルに依存させないため）。ただし**合成の写真は PNG 圧縮率の差を小さく見せる**ので、圧縮率の判断をやり直すときは実写を渡すこと
-
-**画面の撮影は `PrintWindow` で行うこと**（`PW_RENDERFULLCONTENT` を指定する）。
-`Graphics.CopyFromScreen` は「いま画面に映っているもの」を取るため、画面が描画されて
-いない状態（ロック中・リモート切断・省電力での消灯・他ウィンドウでの遮蔽）では
-**白紙になる**。実際にそれが起き、変更による回帰かどうかの切り分けに時間を使った。
-`PrintWindow` は DWM にウィンドウの中身を描き直させるので、画面の状態に依存しない。
-枠は `GetWindowRect` ではなく `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`
-で取る（前者は影のぶん大きい）。
 
 **検証やスクリーンショットの作業用ファイルは、リポジトリ直下に作らないこと**（`%TEMP%` を使う。
 ハーネスも作業フォルダは `Path.GetTempPath()` 配下にしている）。相対パスは実行時の作業フォルダ、
@@ -214,6 +214,14 @@ xUnit などは使っていない（WPF の `Dispatcher` を回す検証が多�
   **同じ画像を作るつもりの縮小は、必ず同じ 1 つの関数を通すこと。**
   呼び出し箇所を分けた時点で「同じ入力に同じ処理だから一致する」という
   説明は成り立たなくなる
+- **ウィンドウの画像を取るのに `Graphics.CopyFromScreen` を使わない。**
+  これは「いま画面に映っているもの」を取るため、画面が描画されていない状態
+  （ロック中・リモート切断・省電力での消灯・他ウィンドウでの遮蔽）では
+  **白紙が返る**。実際にそれが起き、変更による回帰かどうかの切り分けに時間を使った。
+  `PrintWindow` に `PW_RENDERFULLCONTENT`（`0x2`）を渡すと、DWM にウィンドウの
+  中身を描き直させるので画面の状態に依存しない。枠は `GetWindowRect` ではなく
+  `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` で取ること
+  （前者は影のぶん大きい）。実装は `tools/screenshot.ps1`
 - **`ColumnDefinition.MaxWidth` は測定を制限しない。** 列に付けても
   `TextTrimming` が働かず、文字が省略されずに単に切れる。上限は
   **`TextBlock` 側に付ける**こと。固定値にすると窓を広げても省略が
