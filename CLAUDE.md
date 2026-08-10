@@ -132,7 +132,10 @@ dotnet run --project tests/Soroe.Verify -c Release -- --bench 写真.jpg   # 実
 # 画面の撮影。見た目の確認に使う（出力先は絶対パスで渡すこと）
 powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Width 1000 -Height 720
 powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Width 720 -Height 600 -ScrollEnd
+powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Maximize
 ```
+
+`-Width` / `-Height` は XAML と同じ**論理ピクセル**で受け取る（内部で DPI 倍率を掛ける）。
 
 `-ScrollEnd` は調整パネルを末尾まで送ってから撮る。項目が増えて画面に収まらなくなったとき、
 末尾の項目まで届くかの確認に使う。**撮影の実装上の注意は「実装上の必須の注意」を参照**（`Graphics.CopyFromScreen` は使わない）。
@@ -214,6 +217,17 @@ xUnit などは使っていない（WPF の `Dispatcher` を回す検証が多�
   **同じ画像を作るつもりの縮小は、必ず同じ 1 つの関数を通すこと。**
   呼び出し箇所を分けた時点で「同じ入力に同じ処理だから一致する」という
   説明は成り立たなくなる
+- **Win32 の API は物理ピクセルで、WPF のプロパティは論理ピクセルである。**
+  `MoveWindow` や `SetWindowPos` に XAML と同じ数値を渡すと、高 DPI の環境では
+  要求より小さい窓になる。論理ピクセルで指定したいときは
+  `GetDpiForWindow(hwnd) / 96.0` を掛けること。
+  実際、150% の環境で `MoveWindow` に 1000×720 を渡したところ 667×480 相当になり、
+  `MinWidth` / `MinHeight`（720×600）に丸められて、**既定サイズのつもりで
+  最小サイズを撮っていた**。窓が小さくなるだけなので気づきにくく、
+  既定サイズでしか出ない不具合（スクロールバーとスピンボタンの重なり）を
+  長い間見落とした。実装は `tools/screenshot.ps1`
+  - なお **WPF の `Window.Width` / `Height` は論理ピクセル**なので、倍率を掛けては
+    いけない。同じ「幅」でも API によって単位が違う
 - **ウィンドウの画像を取るのに `Graphics.CopyFromScreen` を使わない。**
   これは「いま画面に映っているもの」を取るため、画面が描画されていない状態
   （ロック中・リモート切断・省電力での消灯・他ウィンドウでの遮蔽）では

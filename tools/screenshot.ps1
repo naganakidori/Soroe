@@ -22,7 +22,8 @@ param(
   [int]$Width = 1000,
   [int]$Height = 720,
   [string[]]$ExeArgs = @(),
-  [switch]$ScrollEnd
+  [switch]$ScrollEnd,
+  [switch]$Maximize
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +43,9 @@ public static class WindowShot
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool repaint);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int cmd);
+
+    public const int SW_MAXIMIZE = 3;
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(
@@ -110,7 +114,13 @@ try {
   $dpi = [WindowShot]::GetDpiForWindow($h)
   if ($dpi -eq 0) { $dpi = 96 }
   $scale = $dpi / 96.0
-  [void][WindowShot]::MoveWindow($h, 80, 80, [int]($Width * $scale), [int]($Height * $scale), $true)
+
+  if ($Maximize) {
+    [void][WindowShot]::ShowWindow($h, [WindowShot]::SW_MAXIMIZE)
+  } else {
+    [void][WindowShot]::MoveWindow($h, 80, 80, [int]($Width * $scale), [int]($Height * $scale), $true)
+  }
+
   Start-Sleep -Milliseconds 1200
 
   if ($ScrollEnd) {
