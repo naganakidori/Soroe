@@ -41,6 +41,7 @@ public static class WindowShot
 {
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool repaint);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(
@@ -102,7 +103,14 @@ try {
   if (-not $win) { throw "ウィンドウが見つからない" }
 
   $h = [IntPtr]$win.Current.NativeWindowHandle
-  [void][WindowShot]::MoveWindow($h, 80, 80, $Width, $Height, $true)
+
+  # -Width / -Height は XAML と同じ論理ピクセルで受け取る。MoveWindow は物理ピクセル
+  # なので DPI 倍率を掛ける。掛けないと高 DPI の環境で要求より小さい窓になり、
+  # MinWidth / MinHeight に丸められて「既定サイズの確認」にならない
+  $dpi = [WindowShot]::GetDpiForWindow($h)
+  if ($dpi -eq 0) { $dpi = 96 }
+  $scale = $dpi / 96.0
+  [void][WindowShot]::MoveWindow($h, 80, 80, [int]($Width * $scale), [int]($Height * $scale), $true)
   Start-Sleep -Milliseconds 1200
 
   if ($ScrollEnd) {

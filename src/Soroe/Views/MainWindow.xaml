@@ -232,7 +232,14 @@
                                               ConverterParameter=0.55}"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel>
+                    <!--
+                        右に余白を空ける。Fluent のスクロールバーは内容の上に重ねて
+                        表示されるため、空けないと数値入力欄のスピンボタンに重なり、
+                        押そうとしてスクロールバーを掴む誤操作が起きる。
+                        スクロールバーの有無で幅を変えない。変えると、項目を増やして
+                        スクロールが出た瞬間に中身が横へずれる。
+                    -->
+                    <StackPanel Margin="0,0,16,0">
                         <!--
                             調整パネルは 3 分類で区切る（CLAUDE.md「調整項目」）。
                               1. キャンバスを変える … 回転、リサイズ
