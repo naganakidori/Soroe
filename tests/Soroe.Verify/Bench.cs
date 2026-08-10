@@ -273,7 +273,12 @@ internal static class Bench
             s.Grayscale.Enabled = true;
             s.Binarize.Enabled = true;
         });
-        yield return ("実装済み 6 項目すべて", s =>
+        yield return ("シャープのみ", s =>
+        {
+            s.Sharpen.Enabled = true;
+            s.Sharpen.Value = 100;
+        });
+        yield return ("実装済み 7 項目すべて", s =>
         {
             s.Resize.Enabled = true;
             s.Resize.LongestEdge = 1280;
@@ -285,6 +290,8 @@ internal static class Bench
             s.Saturation.Value = 40;
             s.Grayscale.Enabled = true;
             s.Binarize.Enabled = true;
+            s.Sharpen.Enabled = true;
+            s.Sharpen.Value = 50;
         });
     }
 

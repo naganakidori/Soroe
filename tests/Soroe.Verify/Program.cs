@@ -33,6 +33,7 @@ internal static class Program
         TestResize();
         TestToneCurve();
         TestMonochrome();
+        TestSharpen();
         TestCanonicalImage();
         TestRenderEncodeAgreement();
         TestExport();
@@ -305,6 +306,22 @@ internal static class Program
     private const double MaxMeanDifference = 2.0;
 
     /// <summary>
+    /// シャープを有効にしたときの、プレビューと書き出しの内容差の上限。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="MaxMeanDifference" /> とは<b>根拠を分けて持つ</b>。
+    /// シャープはチェーンで唯一の空間フィルタで、倍率の食い違いを増幅する性質がある。
+    /// 一方あちらの標本はなだらかな階調で、空間フィルタをほとんど働かせない。
+    /// <b>一律に緩めてはいけない。</b>緩めると、シャープ以外の項目で異常が起きたときに
+    /// 気づけなくなる。
+    /// <para>
+    /// 実測（細部のある 3000×4000、倍率 0.40、強さ 100）で、半径に倍率を掛けた実装が
+    /// 0.9 前後、掛けない実装が 2.8〜5.7。1.5 はその間に置いてある。
+    /// </para>
+    /// </remarks>
+    private const double MaxSharpenMeanDifference = 1.5;
+
+    /// <summary>
     /// Clone() が全プロパティを写しているかをリフレクションで検証する。
     /// </summary>
     /// <remarks>
@@ -516,7 +533,7 @@ internal static class Program
 
         Console.WriteLine($"    引き金の対象: {string.Join(", ", leaves.Select(l => l.Path))}");
 
-        Check($"保存対象のプロパティを列挙できた（{leaves.Count} 項目）", leaves.Count >= 21, $"{leaves.Count}");
+        Check($"保存対象のプロパティを列挙できた（{leaves.Count} 項目）", leaves.Count >= 23, $"{leaves.Count}");
 
         var silent = new List<string>();
         var unchangeable = new List<string>();
@@ -1419,6 +1436,132 @@ internal static class Program
     }
 
     /// <summary>
+    /// シャープの空間的な効きが、プレビューと書き出しで揃っているか。
+    /// </summary>
+    /// <remarks>
+    /// シャープはチェーンで初めての空間フィルタで、1 画素だけを見る調整（明るさなど）と違い、
+    /// 画像の大きさに対する相対的な効きが結果を決める。ぼかしの半径に倍率を掛けないと、
+    /// 縮小されたプレビューに原寸と同じ半径を掛けることになり、書き出しと違う絵になる。
+    /// </remarks>
+    private static void TestSharpen()
+    {
+        Console.WriteLine();
+
+        var root = Path.Combine(Path.GetTempPath(), "soroe_vmtest_sharpen");
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+        Directory.CreateDirectory(root);
+
+        var renderer = new ImageRenderer();
+
+        // 二値化の後にシャープが来る。0 と 255 しかない画像では飽和で元へ戻るはず
+        var colorful = Path.Combine(root, "color.png");
+        using (var mat = new Mat(240, 320, MatType.CV_8UC3))
+        {
+            int rows = mat.Rows, cols = mat.Cols;
+            for (var y = 0; y < rows; y++)
+            {
+                for (var x = 0; x < cols; x++)
+                {
+                    mat.Set(y, x, new Vec3b((byte)(x * 255 / cols), (byte)(y * 255 / rows), (byte)((x * y) % 256)));
+                }
+            }
+
+            Cv2.ImEncode(".png", mat, out var png);
+            File.WriteAllBytes(colorful, png);
+        }
+
+        byte[] Run(Action<ProcessingSettings> configure)
+        {
+            var settings = new ProcessingSettings();
+            configure(settings);
+            using var source = renderer.Load(colorful, 0);
+            return renderer.Encode(source!, settings, source!.Scale, new EncodeSettings { Extension = ".png" });
+        }
+
+        var binarizeOnly = Run(s => s.Binarize.Enabled = true);
+        foreach (var strength in new[] { 1, 50, 100 })
+        {
+            var withSharpen = Run(s =>
+            {
+                s.Binarize.Enabled = true;
+                s.Sharpen.Enabled = true;
+                s.Sharpen.Value = strength;
+            });
+
+            Check($"二値化 ON ならシャープ {strength,3} は 1 画素も変えない",
+                binarizeOnly.SequenceEqual(withSharpen));
+        }
+
+        // 二値化していなければ、ちゃんと効くこと（上の一致が「シャープが動いていない」
+        // ことによる偽の合格でないと分かる）
+        var plain = Run(_ => { });
+        var sharpened = Run(s =>
+        {
+            s.Sharpen.Enabled = true;
+            s.Sharpen.Value = 100;
+        });
+        Check("二値化していなければシャープは効く", !plain.SequenceEqual(sharpened));
+
+        Check("強さ 0 なら何も変わらない", plain.SequenceEqual(Run(s =>
+        {
+            s.Sharpen.Enabled = true;
+            s.Sharpen.Value = 0;
+        })));
+
+        CheckSharpenScaleAgreement(renderer, root);
+        DeleteWithRetry(root);
+    }
+
+    /// <summary>
+    /// プレビューと書き出しで、シャープの効きが揃っているか。
+    /// </summary>
+    /// <remarks>
+    /// 既存の「プレビューと書き出しの内容が一致」（閾値 <see cref="MaxMeanDifference" />）とは
+    /// 別に持つ。あちらはなだらかな階調の標本で、空間フィルタをほとんど働かせない。
+    /// <b>閾値を一律に緩めない。</b>緩めると、シャープ以外の項目で異常が起きたときに
+    /// 気づけなくなる。
+    /// <para>
+    /// 実測では、半径に倍率を掛けた実装で平均差 0.9 前後、掛けない実装で 2.8〜5.7 になる。
+    /// 閾値 <see cref="MaxSharpenMeanDifference" /> はその間に置いてある。
+    /// </para>
+    /// </remarks>
+    private static void CheckSharpenScaleAgreement(ImageRenderer renderer, string root)
+    {
+        // 細部のある標本。なだらかな階調ではシャープがほとんど働かず、検証にならない。
+        // 種の解像度で細かさが決まる。細かすぎると実写より高周波に寄り、
+        // 倍率を掛けた正しい実装でも差が大きく出てしまう
+        var path = Path.Combine(root, "detail.png");
+        using (var seed = new Mat(250, 188, MatType.CV_8UC3))
+        {
+            Cv2.Randu(seed, Scalar.All(0), Scalar.All(255));
+            using var mat = new Mat();
+            Cv2.Resize(seed, mat, new OpenCvSharp.Size(3000, 4000), 0, 0, InterpolationFlags.Cubic);
+            Cv2.ImEncode(".png", mat, out var png, [(int)ImwriteFlags.PngCompression, 1]);
+            File.WriteAllBytes(path, png);
+        }
+
+        var settings = new ProcessingSettings();
+        settings.Sharpen.Enabled = true;
+        settings.Sharpen.Value = 100;
+
+        using var full = renderer.Load(path, 0);
+        using var preview = renderer.Load(path, ImageRenderer.CanonicalEdge);
+
+        var encoded = renderer.Encode(full!, settings, full!.Scale, new EncodeSettings { Extension = ".png" });
+        using var exported = Cv2.ImDecode(encoded, ImreadModes.Color);
+
+        var rendered = renderer.Render(preview!, settings, preview!.Scale);
+
+        using var shrunk = new Mat();
+        Cv2.Resize(exported, shrunk, new OpenCvSharp.Size(rendered.PixelWidth, rendered.PixelHeight),
+            interpolation: InterpolationFlags.Area);
+
+        var (mean, max) = Difference(rendered, shrunk);
+        Check($"シャープの効きがプレビューと書き出しで揃う（平均差 {mean:F3} / 最大差 {max}）",
+            mean <= MaxSharpenMeanDifference, $"閾値 {MaxSharpenMeanDifference}");
+    }
+
+    /// <summary>
     /// しきい値の元になる canonical 画像が、プレビュー経路と書き出し経路で同じ画素になるか。
     /// </summary>
     /// <remarks>
@@ -1544,15 +1687,22 @@ internal static class Program
         settings.Contrast.Value = 0;
         settings.Saturation.Value = 0;
 
-        foreach (var (gray, binarize, maxEdge, resizeTo) in new[]
+        foreach (var (gray, binarize, sharpen, maxEdge, resizeTo) in new[]
                  {
-                     (true, false, 0, 0), (false, true, 0, 0), (true, true, 0, 0),
-                     (true, false, 80, 0), (false, true, 80, 0),
-                     (true, false, 0, 100), (false, true, 0, 100), (true, true, 120, 64),
+                     (true, false, 0, 0, 0), (false, true, 0, 0, 0), (true, true, 0, 0, 0),
+                     (true, false, 0, 80, 0), (false, true, 0, 80, 0),
+                     (true, false, 0, 0, 100), (false, true, 0, 0, 100), (true, true, 0, 120, 64),
+
+                     // シャープ。単独と、他の項目・リサイズとの組み合わせ
+                     (false, false, 100, 0, 0), (false, false, 50, 0, 0), (false, false, 100, 80, 0),
+                     (false, false, 100, 0, 100), (true, false, 100, 0, 0), (false, true, 100, 0, 0),
+                     (true, true, 100, 120, 64),
                  })
         {
             settings.Grayscale.Enabled = gray;
             settings.Binarize.Enabled = binarize;
+            settings.Sharpen.Enabled = sharpen > 0;
+            settings.Sharpen.Value = sharpen;
             settings.Resize.Enabled = resizeTo > 0;
             if (resizeTo > 0) settings.Resize.LongestEdge = resizeTo;
 
@@ -1563,8 +1713,9 @@ internal static class Program
             var encoded = renderer.Encode(source, settings, source.Scale, new EncodeSettings { Extension = ".png" });
             using var decoded = Cv2.ImDecode(encoded, ImreadModes.Color);
 
-            var label = $"グレー {(gray ? "ON " : "OFF")} 二値化 {(binarize ? "ON " : "OFF")}、"
-                + $"倍率 {source.Scale:F2}、リサイズ {(resizeTo > 0 ? resizeTo.ToString() : "なし"),4}";
+            var label = $"グレー {(gray ? "ON " : "OFF")} 二値化 {(binarize ? "ON " : "OFF")} "
+                + $"シャープ {sharpen,3}、倍率 {source.Scale:F2}、"
+                + $"リサイズ {(resizeTo > 0 ? resizeTo.ToString() : "なし"),4}";
             if (rendered.PixelWidth != decoded.Width || rendered.PixelHeight != decoded.Height)
             {
                 Check($"{label}: 寸法が一致", false, $"{rendered.PixelWidth}x{rendered.PixelHeight} と {decoded.Width}x{decoded.Height}");

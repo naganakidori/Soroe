@@ -411,6 +411,44 @@
                             代わりに文字で断る。状態に依存しないので常時出す。
                         -->
                         <TextBlock Text="しきい値は画像ごとに自動で決めます。グレースケールと同時に有効でも結果は変わりません"
+                                   Margin="28,2,0,8"
+                                   Opacity="0.6"
+                                   TextWrapping="Wrap" />
+
+                        <Grid Style="{StaticResource AdjustmentRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <CheckBox Grid.Column="0"
+                                      Content="シャープ"
+                                      MinWidth="92"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.Sharpen.Enabled}" />
+
+                            <Slider Grid.Column="1"
+                                    Style="{StaticResource AdjustmentSliderStyle}"
+                                    Minimum="{Binding Source={x:Static models:SharpenOption.MinValue}, Mode=OneTime}"
+                                    Maximum="{Binding Source={x:Static models:SharpenOption.MaxValue}, Mode=OneTime}"
+                                    IsEnabled="{Binding Settings.Sharpen.Enabled}"
+                                    Value="{Binding Settings.Sharpen.Value}" />
+
+                            <controls:NumericSpinner Grid.Column="2"
+                                                     VerticalAlignment="Center"
+                                                     Minimum="{x:Static models:SharpenOption.MinValue}"
+                                                     Maximum="{x:Static models:SharpenOption.MaxValue}"
+                                                     IsEnabled="{Binding Settings.Sharpen.Enabled}"
+                                                     Value="{Binding Settings.Sharpen.Value}" />
+                        </Grid>
+
+                        <!--
+                            2 つとも「効いていないように見える」場面があるので断る。
+                            二値化との関係は実測でゼロ（3600 万要素すべて不変）。
+                            縮小表示の件は、シャープが空間フィルタであることから来る一般的な制約。
+                        -->
+                        <TextBlock Text="二値化と同時に有効にすると効果はありません。効き目は出力サイズに対して決まるため、縮小表示のプレビューでは分かりにくいことがあります"
                                    Margin="28,2,0,4"
                                    Opacity="0.6"
                                    TextWrapping="Wrap" />

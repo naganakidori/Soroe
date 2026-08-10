@@ -28,6 +28,28 @@ public sealed class ImageRenderer : IImageRenderer
     public const int CanonicalEdge = 1600;
 
     /// <summary>
+    /// シャープ（アンシャープマスク）のぼかし半径。出力画素を基準にした値。
+    /// </summary>
+    /// <remarks>
+    /// <b><see cref="CanonicalEdge" /> と同じく、これは調整値ではなく出力を決める定数である。</b>
+    /// 変えると、同じ画像・同じ設定でもシャープの結果が変わり、保存済みのプリセットを
+    /// 読み込んでも以前と違う絵が出る。しかも<b>この値は UI に出していないので、
+    /// 外から見て変わったことが分からない</b>。触るときは出力が変わることを承知のうえで行う。
+    /// <para>
+    /// プレビューでは倍率を掛けて縮める（<c>σ × previewScale</c>）。掛けないと、
+    /// 縮小画像に原寸と同じ半径を掛けることになり、画像に対する相対的な効きが変わる。
+    /// 実測では倍率 0.40 で平均差 3.96、倍率 0.20 で 5.71 になり、
+    /// プレビューと書き出しの一致（閾値 2.0）を大きく超えた。
+    /// </para>
+    /// <para>
+    /// この 2.0 という値は、倍率を掛けた後も効きが残るように選んである。実測では
+    /// σ が 0.3 を下回ると効果が消える。σ 2.0 なら倍率 0.15 まで持つので、
+    /// 長辺 10000px 程度までは効果がプレビューに出る。
+    /// </para>
+    /// </remarks>
+    public const double SharpenSigma = 2.0;
+
+    /// <summary>
     /// PNG の圧縮率。
     /// </summary>
     /// <remarks>
@@ -391,8 +413,9 @@ public sealed class ImageRenderer : IImageRenderer
     /// 6. 二値化 / 7. シャープ / 8. 枠線。
     /// </para>
     /// <para>
-    /// 現時点で実装しているのは 2. リサイズ、3. 明るさ / コントラスト、4. 彩度。
-    /// 残る 4 項目はこのメソッドに順番どおり挿入していく。
+    /// 現時点で実装しているのは 2. リサイズ、3. 明るさ / コントラスト、4. 彩度、
+    /// 5. グレースケール、6. 二値化、7. シャープ。残る 1. 回転と 8. 枠線は
+    /// このメソッドに順番どおり挿入していく。
     /// </para>
     /// <para>
     /// 寸法に関わる調整（2. リサイズ、8. 枠線の太さ）は、まず元画像に対する出力寸法を
@@ -465,6 +488,41 @@ public sealed class ImageRenderer : IImageRenderer
             result = binarized;
         }
 
+        // 7. シャープ
+        if (settings.Sharpen.Enabled && settings.Sharpen.Value != 0)
+        {
+            var sharpened = ApplySharpen(result, settings.Sharpen.Value, context.PreviewScale);
+            result.Dispose();
+            result = sharpened;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// アンシャープマスクでシャープを掛ける。
+    /// </summary>
+    /// <remarks>
+    /// <c>元 + 量 ×（元 − ぼかし）</c>。<b>ぼかしの半径には
+    /// <paramref name="previewScale" /> を掛けること。</b>
+    /// これがチェーンで初めての空間フィルタで、1 画素だけを見る調整（明るさなど）と違い、
+    /// 画像の大きさに対する相対的な効きが結果を決める。倍率を掛けないと、縮小された
+    /// プレビューに原寸と同じ半径を掛けることになり、書き出しと違う絵になる。
+    /// <para>
+    /// 二値化の後に来るため、二値化が有効なときは何も起きない（飽和で元の値に戻る）。
+    /// これは仕様であり、UI で文字で断っている。
+    /// </para>
+    /// </remarks>
+    private static Mat ApplySharpen(Mat source, int strength, double previewScale)
+    {
+        var amount = strength / 50.0;
+        var sigma = SharpenSigma * previewScale;
+
+        using var blurred = new Mat();
+        Cv2.GaussianBlur(source, blurred, new Size(0, 0), sigma);
+
+        var result = new Mat();
+        Cv2.AddWeighted(source, 1.0 + amount, blurred, -amount, 0.0, result);
         return result;
     }
 
