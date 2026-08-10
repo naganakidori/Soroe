@@ -41,10 +41,10 @@ internal static class Bench
 
         Console.WriteLine($"Soroe 性能測定  {DateTime.Now:yyyy-MM-dd HH:mm}");
         Console.WriteLine($"  CPU:  {ProcessorName}（論理 {Environment.ProcessorCount} 個）");
-        Console.WriteLine($"  OS:   {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
+        Console.WriteLine($"  OS:   {OperatingSystemName}");
         Console.WriteLine(
             $"  構成: {Configuration} / {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}"
-            + $"  繰り返し {Repeat} 回の中央値（最初の {Warmup} 回は捨てる）");
+            + $"  {Repeat} 回測って最初の {Warmup} 回を捨て、残り {Repeat - Warmup} 回の中央値");
         Console.WriteLine();
         Console.WriteLine("  ここに出る絶対値は測定した機械に依存する。別の環境で比べるときは、");
         Console.WriteLine("  値そのものではなく比率（圧縮率どうしの関係、形式ごとの桁の違い）で見ること。");
@@ -79,6 +79,10 @@ internal static class Bench
         var shot = Path.Combine(work, "shot.png");
         WriteFlat(shot, 1500, 1080);
         Console.WriteLine("平坦の標本: 合成（3000x4000 と 1500x1080、単色面 + 細線）");
+        Console.WriteLine(
+            "  注意: 合成の平坦画像は規則的な繰り返しが多く、PNG の圧縮率 4 → 6 の利得を");
+        Console.WriteLine(
+            "  過大に見せる（実物のスクリーンショットでは 4 と 6 の差はほぼ無い）。");
 
         var renderer = new ImageRenderer();
 
@@ -99,6 +103,31 @@ internal static class Bench
 #else
         "Release";
 #endif
+
+    /// <summary>
+    /// OS の名前。内部の版だけでは何の OS か分かりにくいので、通称と一緒に出す。
+    /// </summary>
+    /// <remarks>Windows 11 も内部の版は 10.0 で、ビルド 22000 以上が 11 になる。</remarks>
+    private static string OperatingSystemName
+    {
+        get
+        {
+            var version = Environment.OSVersion.Version;
+            var name = version.Major == 10
+                ? version.Build >= 22000 ? "Windows 11" : "Windows 10"
+                : $"Windows {version.Major}.{version.Minor}";
+
+            return $"{name} ({version.Major}.{version.Minor}.{version.Build})";
+        }
+    }
+
+    /// <summary>
+    /// ファイルサイズ。小さいものは MB では潰れるので KB で出す。
+    /// </summary>
+    private static string FormatSize(int bytes)
+        => bytes >= 1024 * 1024
+            ? $"{bytes / 1024.0 / 1024.0:F2}MB"
+            : $"{bytes / 1024.0:F1}KB";
 
     /// <summary>
     /// CPU の名前。取れなければ分かる範囲で返す。
@@ -170,7 +199,7 @@ internal static class Bench
                     size = bytes.Length;
                 });
 
-                Console.WriteLine($"    圧縮率 {level}  {elapsed,7:F0}ms  {size / 1024.0 / 1024.0,7:F2}MB");
+                Console.WriteLine($"    圧縮率 {level}  {elapsed,7:F0}ms  {FormatSize(size),10}");
             }
         }
     }
