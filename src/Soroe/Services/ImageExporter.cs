@@ -130,7 +130,14 @@ public sealed class ImageExporter : IImageExporter
 
         for (var i = 0; i < sourcePaths.Count; i++)
         {
-            // 1 枚のエンコードは長くても数百 ms なので、その途中で割り込む必要はない
+            // 中止の確認は 1 枚ごと。エンコードの途中では割り込まない。
+            //
+            // 1 枚にかかる時間は出力形式で大きく変わる。実測（Release、3000×4000 の写真、
+            // 読み込みから書き込みまで）で JPEG 79ms / BMP 82ms に対し、
+            // WebP は 1.8 秒、PNG は 2.3 秒かかる。
+            // したがって「中止を押してから止まるまで」は、最悪でこの 1 枚分待つことになる。
+            // 途中で割り込む作りにすると中途半端なファイルの後始末が要るので、
+            // 1 枚を区切りにするこの形は変えない
             if (cancellationToken.IsCancellationRequested)
             {
                 canceled = true;
