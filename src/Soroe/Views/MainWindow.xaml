@@ -392,6 +392,26 @@
                                                      IsEnabled="{Binding Settings.Saturation.Enabled}"
                                                      Value="{Binding Settings.Saturation.Value}" />
                         </Grid>
+
+                        <!-- ここから下は値を持たない。チェックボックスだけの行 -->
+                        <CheckBox Content="グレースケール"
+                                  Margin="0,0,0,4"
+                                  IsChecked="{Binding Settings.Grayscale.Enabled}" />
+
+                        <CheckBox Content="二値化（白と黒だけにする）"
+                                  Margin="0,0,0,0"
+                                  IsChecked="{Binding Settings.Binarize.Enabled}" />
+
+                        <!--
+                            二値化はそれ自体が輝度へ落とすので、グレースケールと同時に
+                            有効でも結果は変わらない。ここで設定を自動で切り替えたりは
+                            しない（触っていない設定が勝手に変わるほうが分かりにくい）。
+                            代わりに文字で断る。状態に依存しないので常時出す。
+                        -->
+                        <TextBlock Text="しきい値は画像ごとに自動で決めます。グレースケールと同時に有効でも結果は変わりません"
+                                   Margin="28,2,0,4"
+                                   Opacity="0.6"
+                                   TextWrapping="Wrap" />
                     </StackPanel>
                     </ScrollViewer>
                 </Border>

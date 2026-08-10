@@ -36,6 +36,8 @@ public sealed class ProcessingSettings
         Brightness.PropertyChanged += OnOptionChanged;
         Contrast.PropertyChanged += OnOptionChanged;
         Saturation.PropertyChanged += OnOptionChanged;
+        Grayscale.PropertyChanged += OnOptionChanged;
+        Binarize.PropertyChanged += OnOptionChanged;
     }
 
     /// <summary>
@@ -78,6 +80,12 @@ public sealed class ProcessingSettings
     /// <summary>彩度（適用順序 4 番目）。</summary>
     public SaturationOption Saturation { get; } = new();
 
+    /// <summary>グレースケール（適用順序 5 番目）。</summary>
+    public GrayscaleOption Grayscale { get; } = new();
+
+    /// <summary>二値化（適用順序 6 番目）。</summary>
+    public BinarizeOption Binarize { get; } = new();
+
     /// <summary>
     /// 現在の値をそのまま写した別インスタンスを返す。
     /// </summary>
@@ -109,6 +117,8 @@ public sealed class ProcessingSettings
             Enabled = Saturation.Enabled,
             Value = Saturation.Value,
         },
+        Grayscale = { Enabled = Grayscale.Enabled },
+        Binarize = { Enabled = Binarize.Enabled },
     };
 
     private void OnOptionChanged(object? sender, PropertyChangedEventArgs e)

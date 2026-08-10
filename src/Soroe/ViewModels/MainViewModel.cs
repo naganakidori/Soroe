@@ -24,8 +24,14 @@ public sealed partial class MainViewModel : ObservableObject
     /// <remarks>
     /// スライダーを動かすたびに全画素を処理するため、原寸のままでは追従できない。
     /// 表示に足りる程度まで縮めてから調整をかけ、書き出し時にフル解像度で計算し直す。
+    /// <para>
+    /// <b>値は <see cref="ImageRenderer.CanonicalEdge" /> をそのまま使う。ここに数字を
+    /// 書かないこと。</b>二値化のしきい値は同じ寸法に縮小した画像から決まるので、
+    /// 2 か所に別々の数字があると、片方だけ変えたときにプレビューと書き出しで
+    /// 違う絵が出る。窓の大きさや DPI に依存させてもいけない。
+    /// </para>
     /// </remarks>
-    private const int PreviewMaxEdge = 1600;
+    private const int PreviewMaxEdge = ImageRenderer.CanonicalEdge;
 
     /// <summary>取り扱う拡張子。これ以外のファイルは追加時に無視する。</summary>
     private static readonly HashSet<string> SupportedExtensions =

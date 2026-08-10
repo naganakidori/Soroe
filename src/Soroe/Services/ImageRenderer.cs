@@ -12,6 +12,22 @@ namespace Soroe.Services;
 public sealed class ImageRenderer : IImageRenderer
 {
     /// <summary>
+    /// プレビューに使う長辺の上限。
+    /// </summary>
+    /// <remarks>
+    /// <b>これは性能の調整値ではなく、出力を決める定数である。</b>
+    /// 二値化のしきい値は大津の方法で画像から決まるが、その計算はこの寸法に縮小した
+    /// 画像に対して行う（プレビューと書き出しで同じ値を得るため）。したがって
+    /// <b>この値を変えると、同じ画像・同じ設定でも二値化の結果が変わる。</b>
+    /// 保存済みのプリセットを読み込んでも以前と違う絵が出る。
+    /// <para>
+    /// 窓の大きさや DPI に依存させてはいけない。依存させると、窓を広げただけで
+    /// 二値化の結果が変わる。
+    /// </para>
+    /// </remarks>
+    public const int CanonicalEdge = 1600;
+
+    /// <summary>
     /// PNG の圧縮率。
     /// </summary>
     /// <remarks>
@@ -53,8 +69,8 @@ public sealed class ImageRenderer : IImageRenderer
             return null;
         }
 
-        var longest = Math.Max(decoded.Width, decoded.Height);
-        if (maxEdge <= 0 || longest <= maxEdge)
+        var resized = Downscale(decoded, maxEdge);
+        if (resized is null)
         {
             // 縮小不要。読み込んだものをそのまま渡す（破棄の責任も RenderSource に移る）
             return new RenderSource(decoded, decoded.Width, decoded.Height, 1.0);
@@ -63,13 +79,45 @@ public sealed class ImageRenderer : IImageRenderer
         // 縮小後だけを保持し、原寸のほうは破棄する
         using (decoded)
         {
-            var scale = (double)maxEdge / longest;
-            var resized = new Mat();
-
-            // 縮小は Area が最もモアレが出にくい
-            Cv2.Resize(decoded, resized, new Size(), scale, scale, InterpolationFlags.Area);
-            return new RenderSource(resized, decoded.Width, decoded.Height, scale);
+            return new RenderSource(
+                resized, decoded.Width, decoded.Height, ScaleFor(decoded.Width, decoded.Height, maxEdge));
         }
+    }
+
+    /// <summary>
+    /// 長辺を <paramref name="maxEdge" /> 以内に縮める。縮小が要らなければ <see langword="null" />。
+    /// </summary>
+    /// <remarks>
+    /// <b>同じ画像を作るつもりの縮小は、必ずこの 1 つの関数を通すこと。</b>
+    /// <c>Cv2.Resize</c> は倍率で指定するか寸法で指定するかで内部の係数の求め方が変わり、
+    /// 割り切れない比では別の画素になる。実測では、2551×1699 を長辺 1600 へ縮めたとき、
+    /// 同じ寸法でありながら全体の 54% の画素が違い、最大差は 30 階調だった。
+    /// <para>
+    /// 二値化のしきい値はこの縮小結果から決まるため、呼び出し箇所を分けた時点で
+    /// 「プレビューと書き出しで同じ値になる」という保証が失われる。
+    /// </para>
+    /// </remarks>
+    private static Mat? Downscale(Mat source, int maxEdge)
+    {
+        var longest = Math.Max(source.Width, source.Height);
+        if (maxEdge <= 0 || longest <= maxEdge)
+        {
+            return null;
+        }
+
+        var scale = ScaleFor(source.Width, source.Height, maxEdge);
+        var resized = new Mat();
+
+        // 縮小は Area が最もモアレが出にくい
+        Cv2.Resize(source, resized, new Size(), scale, scale, InterpolationFlags.Area);
+        return resized;
+    }
+
+    /// <summary>長辺を <paramref name="maxEdge" /> 以内に収めるための倍率。</summary>
+    private static double ScaleFor(int width, int height, int maxEdge)
+    {
+        var longest = Math.Max(width, height);
+        return maxEdge <= 0 || longest <= maxEdge ? 1.0 : (double)maxEdge / longest;
     }
 
     /// <inheritdoc />
@@ -378,7 +426,147 @@ public sealed class ImageRenderer : IImageRenderer
             result = saturated;
         }
 
+        // 5. グレースケール
+        if (settings.Grayscale.Enabled)
+        {
+            var gray = ToGray3(result);
+            result.Dispose();
+            result = gray;
+        }
+
+        // 6. 二値化（大津）
+        if (settings.Binarize.Enabled)
+        {
+            var threshold = ResolveThreshold(original, settings, context, result);
+            var binarized = ApplyBinarize(result, threshold);
+            result.Dispose();
+            result = binarized;
+        }
+
         return result;
+    }
+
+    /// <summary>
+    /// 3ch のまま輝度へ落とす。
+    /// </summary>
+    /// <remarks>
+    /// チェーンは常に 8bit 3ch で流すため、1ch にはしない。
+    /// 結果は「彩度 -100」と全画素一致する。
+    /// </remarks>
+    private static Mat ToGray3(Mat source)
+    {
+        using var gray = new Mat();
+        Cv2.CvtColor(source, gray, ColorConversionCodes.BGR2GRAY);
+
+        var result = new Mat();
+        Cv2.CvtColor(gray, result, ColorConversionCodes.GRAY2BGR);
+        return result;
+    }
+
+    /// <summary>
+    /// 与えられたしきい値で白黒に分ける。
+    /// </summary>
+    private static Mat ApplyBinarize(Mat source, double threshold)
+    {
+        using var gray = new Mat();
+        Cv2.CvtColor(source, gray, ColorConversionCodes.BGR2GRAY);
+
+        using var binary = new Mat();
+        Cv2.Threshold(gray, binary, threshold, 255, ThresholdTypes.Binary);
+
+        var result = new Mat();
+        Cv2.CvtColor(binary, result, ColorConversionCodes.GRAY2BGR);
+        return result;
+    }
+
+    /// <summary>
+    /// 二値化のしきい値を決める。
+    /// </summary>
+    /// <remarks>
+    /// <b>必ず <see cref="CanonicalEdge" /> に縮小した画像から求める。</b>
+    /// プレビューは縮小画像、書き出しは原寸を処理するので、それぞれの画素から
+    /// 大津を求めると値が食い違う。二値化はしきい値 1 階調のずれで広い面積が反転しうる
+    /// （実測で、谷の狭いヒストグラムでは 1 階調の差で 11.6% の画素が反転した）。
+    /// <para>
+    /// プレビューの入力は既に canonical そのものなので、そのときは計算済みの
+    /// <paramref name="current" /> をそのまま使う。書き出しのときだけ、元画像を
+    /// canonical へ縮めてチェーンを流し直す。<b>どちらも同じ入力に同じ処理を掛ける</b>ので、
+    /// 得られる値は一致する。
+    /// </para>
+    /// <para>
+    /// 代償として、しきい値は原寸ではなく縮小画像から決まる。原寸の大津のほうが
+    /// 良い値を出す場面はありうるが、ユーザーが見て納得したのは縮小画像から
+    /// 決まった値のほうである。「見たとおりに出る」を優先する。
+    /// </para>
+    /// </remarks>
+    private static double ResolveThreshold(
+        Mat original, ProcessingSettings settings, RenderContext context, Mat current)
+    {
+        var canonicalScale = ScaleFor(context.OriginalWidth, context.OriginalHeight, CanonicalEdge);
+
+        // プレビュー経路。入力が既に canonical なので、いま作った結果がそのまま使える
+        if (context.PreviewScale == canonicalScale)
+        {
+            return Otsu(current);
+        }
+
+        // 書き出し経路。元画像を canonical へ縮めて、同じチェーンを流し直す
+        using var canonical = Downscale(original, CanonicalEdge);
+        if (canonical is null)
+        {
+            // 元画像が canonical 以下。縮小が要らないので現在の結果がそのまま canonical
+            return Otsu(current);
+        }
+
+        using var canonicalResult = Apply(
+            canonical,
+            WithoutBinarize(settings),
+            new RenderContext(context.OriginalWidth, context.OriginalHeight, canonicalScale));
+
+        return Otsu(canonicalResult);
+    }
+
+    /// <summary>
+    /// 二値化だけを外した写しを返す。しきい値を求めるための再帰を 1 段で止める。
+    /// </summary>
+    private static ProcessingSettings WithoutBinarize(ProcessingSettings settings)
+    {
+        var copy = settings.Clone();
+        copy.Binarize.Enabled = false;
+        return copy;
+    }
+
+    /// <summary>大津の方法でしきい値を求める。</summary>
+    private static double Otsu(Mat bgr)
+    {
+        using var gray = new Mat();
+        Cv2.CvtColor(bgr, gray, ColorConversionCodes.BGR2GRAY);
+
+        using var binary = new Mat();
+        return Cv2.Threshold(gray, binary, 0, 255, ThresholdTypes.Otsu | ThresholdTypes.Binary);
+    }
+
+    /// <summary>
+    /// しきい値の計算に使う canonical 画像を、可逆形式（PNG）で返す。
+    /// </summary>
+    /// <returns>PNG のバイト列。</returns>
+    /// <remarks>
+    /// 検証用。プレビュー経路と書き出し経路で canonical 画像が同じ画素になることを、
+    /// <c>Mat</c> を外へ出さずに確かめられるようにするために持つ。
+    /// <b>2 つの経路で作った結果がバイト一致しなければ、しきい値の一致は保証されない。</b>
+    /// </remarks>
+    public byte[] EncodeCanonical(RenderSource source)
+    {
+        var canonical = Downscale(source.Image, CanonicalEdge);
+        try
+        {
+            Cv2.ImEncode(".png", canonical ?? source.Image, out var bytes, [(int)ImwriteFlags.PngCompression, 1]);
+            return bytes;
+        }
+        finally
+        {
+            canonical?.Dispose();
+        }
     }
 
     /// <summary>

@@ -24,6 +24,8 @@ internal static class Program
         TestResolveSize();
         TestResize();
         TestToneCurve();
+        TestMonochrome();
+        TestCanonicalImage();
         TestRenderEncodeAgreement();
         TestExport();
         TestFormats();
@@ -506,7 +508,7 @@ internal static class Program
 
         Console.WriteLine($"    引き金の対象: {string.Join(", ", leaves.Select(l => l.Path))}");
 
-        Check($"保存対象のプロパティを列挙できた（{leaves.Count} 項目）", leaves.Count >= 19, $"{leaves.Count}");
+        Check($"保存対象のプロパティを列挙できた（{leaves.Count} 項目）", leaves.Count >= 21, $"{leaves.Count}");
 
         var silent = new List<string>();
         var unchangeable = new List<string>();
@@ -1183,6 +1185,283 @@ internal static class Program
         DeleteWithRetry(root);
     }
 
+    /// <summary>
+    /// グレースケールと二値化。相互作用と、彩度との地続きを確かめる。
+    /// </summary>
+    private static void TestMonochrome()
+    {
+        Console.WriteLine();
+
+        var root = Path.Combine(Path.GetTempPath(), "soroe_vmtest_mono");
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+        Directory.CreateDirectory(root);
+
+        // 色の偏りが出るよう、3 チャンネルが別々に動く画像にする
+        var path = Path.Combine(root, "color.png");
+        using (var mat = new Mat(120, 160, MatType.CV_8UC3))
+        {
+            int rows = mat.Rows, cols = mat.Cols;
+            for (var y = 0; y < rows; y++)
+            {
+                for (var x = 0; x < cols; x++)
+                {
+                    mat.Set(y, x, new Vec3b((byte)(x * 255 / cols), (byte)(y * 255 / rows), (byte)((x * y) % 256)));
+                }
+            }
+
+            Cv2.ImEncode(".png", mat, out var png);
+            File.WriteAllBytes(path, png);
+        }
+
+        var renderer = new ImageRenderer();
+
+        byte[] Run(Action<ProcessingSettings> configure)
+        {
+            var settings = new ProcessingSettings();
+            configure(settings);
+            using var source = renderer.Load(path, 0);
+            return renderer.Encode(source!, settings, source!.Scale, new EncodeSettings { Extension = ".png" });
+        }
+
+        // 束 1 で彩度を輝度補間にした根拠。ここが崩れると設計判断の前提が崩れる
+        var saturationMinus100 = Run(s => { s.Saturation.Enabled = true; s.Saturation.Value = -100; });
+        var grayscaleOn = Run(s => s.Grayscale.Enabled = true);
+        Check("「彩度 -100」と「グレースケール ON」が全画素一致",
+            saturationMinus100.SequenceEqual(grayscaleOn));
+
+        // 吸収。二値化が ON なら、グレースケールの ON / OFF は結果を変えない
+        var binarizeOnly = Run(s => s.Binarize.Enabled = true);
+        var binarizeWithGray = Run(s => { s.Grayscale.Enabled = true; s.Binarize.Enabled = true; });
+        Check("二値化 ON ならグレースケールの有無で結果が変わらない",
+            binarizeOnly.SequenceEqual(binarizeWithGray));
+
+        // 彩度は吸収されない。グレースケールと同じ形に見えるが別物である。
+        //
+        // 彩度は out = 元 × k + グレー × (1-k)。k <= 1 では出力が元とグレーの間に
+        // 収まるので飽和せず、輝度は理屈どおり変わらない（残る差は 8bit の丸めだけ）。
+        // k > 1 では 0 / 255 で頭打ちになり、飽和した画素の輝度が実際に変わる。
+        // 順序が固定である以上これは仕様であって不具合ではない。
+        double SaturationEffect(int value)
+        {
+            var withSaturation = Run(s =>
+            {
+                s.Saturation.Enabled = true;
+                s.Saturation.Value = value;
+                s.Binarize.Enabled = true;
+            });
+
+            using var a = Cv2.ImDecode(binarizeOnly, ImreadModes.Color);
+            using var b = Cv2.ImDecode(withSaturation, ImreadModes.Color);
+            using var diff = new Mat();
+            Cv2.Absdiff(a, b, diff);
+            return Cv2.CountNonZero(diff.Reshape(1)) / 3.0 / (a.Rows * a.Cols);
+        }
+
+        var lowered = SaturationEffect(-40);
+        Check($"彩度を下げる方向は二値化にほぼ影響しない（差 {lowered * 100:F3}%、丸めのみ）",
+            lowered < 0.005, $"{lowered * 100:F3}%");
+
+        var raised = SaturationEffect(80);
+        Check($"彩度を上げる方向は二値化に影響する（差 {raised * 100:F3}%、飽和で輝度が変わる）",
+            raised > 0.005, $"{raised * 100:F3}%");
+
+        // 出力が白と黒だけであること
+        using (var binarized = Cv2.ImDecode(binarizeOnly, ImreadModes.Color))
+        {
+            var levels = new HashSet<int>();
+            int rows = binarized.Rows, cols = binarized.Cols;
+            for (var y = 0; y < rows; y++)
+            {
+                for (var x = 0; x < cols; x++)
+                {
+                    var p = binarized.At<Vec3b>(y, x);
+                    levels.Add(p.Item0);
+                    levels.Add(p.Item1);
+                    levels.Add(p.Item2);
+                }
+            }
+
+            Check("二値化の出力は 0 と 255 だけ",
+                levels.All(v => v is 0 or 255) && levels.Count == 2, string.Join(",", levels.Order()));
+        }
+
+        // グレースケールは 3ch のまま（チェーンは常に 8bit 3ch）
+        using (var gray = Cv2.ImDecode(grayscaleOn, ImreadModes.Unchanged))
+        {
+            Check("グレースケールでもチャンネル数は 3", gray.Channels() == 3, $"{gray.Channels()}ch");
+        }
+
+        CheckThresholdAgreement(renderer, root);
+        DeleteWithRetry(root);
+    }
+
+    /// <summary>
+    /// 二値化のしきい値が、プレビューと書き出しで同じ値になるかを確かめる。
+    /// </summary>
+    /// <remarks>
+    /// 出力どうしを直接比べる方法は使えない。二値化した細かい模様を縮小すると中間色に
+    /// なるため、しきい値が同じでも平均差が大きく出てしまう。
+    /// <para>
+    /// 代わりに<b>なだらかな階調の帯を仕込み、白黒が切り替わる位置から
+    /// しきい値そのものを読み取る</b>。階調は縮小しても形が保たれるので、
+    /// 読み取った値を両経路で直接比べられる。
+    /// </para>
+    /// <para>
+    /// 帯の下には細かい雑音を置く。縮小で平均化されてヒストグラムが大きく変わるため、
+    /// 経路ごとに大津を求める素朴な作りだと、ここで値が食い違う。
+    /// </para>
+    /// </remarks>
+    private static void CheckThresholdAgreement(ImageRenderer renderer, string root)
+    {
+        // 長辺 4000。canonical へ 0.4 倍に縮むので、細い模様が十分に平均化される
+        const int width = 4000;
+        const int height = 3000;
+
+        // 上の帯はしきい値を読み取るための階調。面積を抑えてヒストグラムへの影響を小さくする
+        const int rampHeight = 240;
+
+        var path = Path.Combine(root, "ramp_and_lines.png");
+        using (var mat = new Mat(height, width, MatType.CV_8UC3, Scalar.All(245)))
+        {
+            for (var y = 0; y < rampHeight; y++)
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    var v = (byte)(x * 255 / (width - 1));
+                    mat.Set(y, x, new Vec3b(v, v, v));
+                }
+            }
+
+            // 下は白地に細い黒線（文書のスキャンに近い形）。
+            // 原寸では 245 の山と 30 の小さな山、縮小すると線がぼけて中間色が増え、
+            // ヒストグラムの形が変わる。経路ごとに大津を求めるとここで値が食い違う
+            for (var y = rampHeight + 40; y < height - 40; y += 60)
+            {
+                for (var x = 40; x < width - 40; x += 5)
+                {
+                    if ((x / 5) % 7 == 0)
+                    {
+                        continue;
+                    }
+
+                    for (var t = 0; t < 3; t++)
+                    {
+                        mat.Set(y + t, x, new Vec3b(30, 30, 30));
+                        mat.Set(y + t, x + 1, new Vec3b(30, 30, 30));
+                    }
+                }
+            }
+
+            Cv2.ImEncode(".png", mat, out var png);
+            File.WriteAllBytes(path, png);
+        }
+
+        var settings = new ProcessingSettings();
+        settings.Binarize.Enabled = true;
+
+        using var full = renderer.Load(path, 0);
+        using var preview = renderer.Load(path, ImageRenderer.CanonicalEdge);
+
+        var exported = renderer.Encode(full!, settings, full!.Scale, new EncodeSettings { Extension = ".png" });
+        using var exportedMat = Cv2.ImDecode(exported, ImreadModes.Color);
+        var rendered = renderer.Render(preview!, settings, preview!.Scale);
+
+        var fromExport = ReadThreshold(exportedMat);
+        var fromPreview = ReadThreshold(rendered);
+
+        Check($"二値化のしきい値がプレビューと書き出しで一致（{fromPreview} と {fromExport}）",
+            Math.Abs(fromPreview - fromExport) <= 1, $"差 {Math.Abs(fromPreview - fromExport)} 階調");
+    }
+
+    /// 階調の帯で白へ切り替わる位置から、使われたしきい値を逆算する
+    private static int ReadThreshold(Mat binarized)
+    {
+        // 階調の帯は上端から 8% ぶん。その内側を読む
+        var y = binarized.Rows / 25;
+        var cols = binarized.Cols;
+        for (var x = 0; x < cols; x++)
+        {
+            if (binarized.At<Vec3b>(y, x).Item0 == 255)
+            {
+                return x * 255 / (cols - 1);
+            }
+        }
+
+        return -1;
+    }
+
+    /// 同上。プレビュー側は BitmapSource で返る
+    private static int ReadThreshold(BitmapSource binarized)
+    {
+        var bytesPerPixel = (binarized.Format.BitsPerPixel + 7) / 8;
+        var stride = binarized.PixelWidth * bytesPerPixel;
+        var buffer = new byte[stride * binarized.PixelHeight];
+        binarized.CopyPixels(buffer, stride, 0);
+
+        var y = binarized.PixelHeight / 25;
+        for (var x = 0; x < binarized.PixelWidth; x++)
+        {
+            if (buffer[(y * stride) + (x * bytesPerPixel)] == 255)
+            {
+                return x * 255 / (binarized.PixelWidth - 1);
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// しきい値の元になる canonical 画像が、プレビュー経路と書き出し経路で同じ画素になるか。
+    /// </summary>
+    /// <remarks>
+    /// 「同じ入力に同じ処理を掛けるから一致する」という説明は、canonical 画像そのものが
+    /// 両経路で同一である場合にしか成り立たない。<c>Cv2.Resize</c> は倍率指定と寸法指定で
+    /// 内部の係数の求め方が違い、割り切れない比では別の画素になる。
+    /// <para>
+    /// 壊れても実写では差が出ず、谷の狭いヒストグラムの画像でだけ症状が出るため、
+    /// 通ったことが動いている証拠にならない種類の防御である。
+    /// </para>
+    /// </remarks>
+    private static void TestCanonicalImage()
+    {
+        Console.WriteLine();
+
+        var root = Path.Combine(Path.GetTempPath(), "soroe_vmtest_canonical");
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+        Directory.CreateDirectory(root);
+
+        var renderer = new ImageRenderer();
+
+        // 1600 / 長辺 が割り切れない寸法をわざと混ぜる。割り切れる比だけだと
+        // 縮小の書き方が違っても偶然一致してしまい、検出できない
+        foreach (var (width, height) in new[]
+                 {
+                     (3000, 4000), (3000, 2001), (2999, 1777), (2551, 1699), (1601, 1201), (800, 600),
+                 })
+        {
+            var path = Path.Combine(root, $"s_{width}x{height}.png");
+            using (var mat = new Mat(height, width, MatType.CV_8UC3))
+            {
+                // 縮小の係数の違いが出るよう、細かい模様を入れる
+                Cv2.Randu(mat, Scalar.All(0), Scalar.All(255));
+                Cv2.ImEncode(".png", mat, out var png);
+                File.WriteAllBytes(path, png);
+            }
+
+            using var preview = renderer.Load(path, ImageRenderer.CanonicalEdge);
+            using var full = renderer.Load(path, 0);
+
+            var fromPreview = renderer.EncodeCanonical(preview!);
+            var fromFull = renderer.EncodeCanonical(full!);
+
+            Check($"canonical 画像が両経路でバイト一致（{width}x{height}）",
+                fromPreview.SequenceEqual(fromFull),
+                $"{fromPreview.Length} バイトと {fromFull.Length} バイト");
+        }
+
+        DeleteWithRetry(root);
+    }
+
     private static void TestRenderEncodeAgreement()
     {
         Console.WriteLine();
@@ -1237,12 +1516,47 @@ internal static class Program
             using var source = renderer.Load(path, maxEdge);
             var rendered = renderer.Render(source!, settings, source!.Scale);
 
-            // 比較のため可逆な形式でエンコードする（JPEG では非可逆なので一致しない）
             var encoded = renderer.Encode(source, settings, source.Scale, new EncodeSettings { Extension = ".png" });
             using var decoded = Cv2.ImDecode(encoded, ImreadModes.Color);
 
             var label = $"明 {value,4} コン {contrast,4} 彩 {saturation,4}、倍率 {source.Scale:F2}、"
                 + $"リサイズ {(resizeTo > 0 ? resizeTo.ToString() : "なし"),4}";
+            if (rendered.PixelWidth != decoded.Width || rendered.PixelHeight != decoded.Height)
+            {
+                Check($"{label}: 寸法が一致", false,
+                    $"{rendered.PixelWidth}x{rendered.PixelHeight} と {decoded.Width}x{decoded.Height}");
+                continue;
+            }
+
+            Check($"{label}: 全画素が一致", SamePixels(rendered, decoded, out var detail), detail);
+        }
+
+        // グレースケールと二値化。値を持たないので組み合わせで回す
+        settings.Brightness.Value = 0;
+        settings.Contrast.Value = 0;
+        settings.Saturation.Value = 0;
+
+        foreach (var (gray, binarize, maxEdge, resizeTo) in new[]
+                 {
+                     (true, false, 0, 0), (false, true, 0, 0), (true, true, 0, 0),
+                     (true, false, 80, 0), (false, true, 80, 0),
+                     (true, false, 0, 100), (false, true, 0, 100), (true, true, 120, 64),
+                 })
+        {
+            settings.Grayscale.Enabled = gray;
+            settings.Binarize.Enabled = binarize;
+            settings.Resize.Enabled = resizeTo > 0;
+            if (resizeTo > 0) settings.Resize.LongestEdge = resizeTo;
+
+            using var source = renderer.Load(path, maxEdge);
+            var rendered = renderer.Render(source!, settings, source!.Scale);
+
+            // 比較のため可逆な形式でエンコードする（JPEG では非可逆なので一致しない）
+            var encoded = renderer.Encode(source, settings, source.Scale, new EncodeSettings { Extension = ".png" });
+            using var decoded = Cv2.ImDecode(encoded, ImreadModes.Color);
+
+            var label = $"グレー {(gray ? "ON " : "OFF")} 二値化 {(binarize ? "ON " : "OFF")}、"
+                + $"倍率 {source.Scale:F2}、リサイズ {(resizeTo > 0 ? resizeTo.ToString() : "なし"),4}";
             if (rendered.PixelWidth != decoded.Width || rendered.PixelHeight != decoded.Height)
             {
                 Check($"{label}: 寸法が一致", false, $"{rendered.PixelWidth}x{rendered.PixelHeight} と {decoded.Width}x{decoded.Height}");
