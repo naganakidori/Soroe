@@ -9,7 +9,17 @@
       "PowerShell(dotnet add *)",
       "PowerShell(dotnet format *)",
       "PowerShell(dotnet --version)",
-      "PowerShell(git *)"
+      "PowerShell(git *)",
+      "PowerShell(cd *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Select-Object *)",
+      "PowerShell(Where-Object *)",
+      "PowerShell(Select-String *)",
+      "PowerShell(Sort-Object *)",
+      "PowerShell(Measure-Object *)",
+      "PowerShell(Out-String *)",
+      "PowerShell(Test-Path *)"
     ],
     "ask": [
       "PowerShell(git push *)",
