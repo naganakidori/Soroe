@@ -397,13 +397,21 @@ public sealed class ImageRenderer : IImageRenderer
     /// <para>
     /// 中心は 128 ではなく 127.5。0 と 255 が対称に動くようにするため。
     /// </para>
+    /// <para>
+    /// <b>倍率は <c>2^(contrast/100)</c>。</b>-100 で 0.5 倍、0 で 1 倍、+100 で 2 倍と、
+    /// 倍率が対称になる。<c>1 + contrast/100</c> だと -100 で 0 倍になり、
+    /// 一面が中間の明るさに潰れて画像の情報が完全に消える。-50 の時点で 0.5 倍と
+    /// かなり平坦で、スライダーの下半分の大部分が実用にならない領域になっていた。
+    /// </para>
     /// </remarks>
     /// <param name="brightness">加算する量（-100〜100）。0 で変化なし。</param>
     /// <param name="contrast">コントラストの強さ（-100〜100）。0 で変化なし。</param>
     private static Mat BuildToneLut(int brightness, int contrast)
     {
         const double center = 127.5;
-        var scale = 1.0 + (contrast / 100.0);
+
+        // contrast が 0 なら 2^0 = 1 になり、明るさ単独の結果は変わらない
+        var scale = Math.Pow(2.0, contrast / 100.0);
 
         var lut = new Mat(1, 256, MatType.CV_8UC1);
         for (var i = 0; i < 256; i++)

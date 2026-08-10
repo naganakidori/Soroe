@@ -23,6 +23,7 @@ internal static class Program
         TestCloneCompleteness();
         TestResolveSize();
         TestResize();
+        TestToneCurve();
         TestRenderEncodeAgreement();
         TestExport();
         TestFormats();
@@ -1108,6 +1109,80 @@ internal static class Program
     }
 
     /// プレビューと書き出しで結果が一致すること。ここが崩れると Soroe の売りが壊れる
+    /// <summary>
+    /// コントラストの効き方を、両端の画素値で固定する。
+    /// </summary>
+    /// <remarks>
+    /// 倍率は 2^(c/100)。1 + c/100 に戻すと -100 で 0 倍になり、一面が中間の明るさに
+    /// 潰れて画像が消える。設計上の判断なので、値そのもので押さえておく。
+    /// </remarks>
+    private static void TestToneCurve()
+    {
+        Console.WriteLine();
+
+        var root = Path.Combine(Path.GetTempPath(), "soroe_vmtest_tone");
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+        Directory.CreateDirectory(root);
+
+        // 0 と 255 を含む横方向のグレー階調
+        var path = Path.Combine(root, "ramp.png");
+        using (var mat = new Mat(8, 256, MatType.CV_8UC3))
+        {
+            for (var y = 0; y < 8; y++)
+            {
+                for (var x = 0; x < 256; x++)
+                {
+                    mat.Set(y, x, new Vec3b((byte)x, (byte)x, (byte)x));
+                }
+            }
+
+            Cv2.ImEncode(".png", mat, out var png);
+            File.WriteAllBytes(path, png);
+        }
+
+        var renderer = new ImageRenderer();
+
+        // 入力 x に対する出力を返す
+        int[] Apply(int contrast)
+        {
+            var settings = new ProcessingSettings();
+            settings.Contrast.Enabled = true;
+            settings.Contrast.Value = contrast;
+
+            using var source = renderer.Load(path, 0);
+            var encoded = renderer.Encode(source!, settings, source!.Scale, new EncodeSettings { Extension = ".png" });
+            using var decoded = Cv2.ImDecode(encoded, ImreadModes.Color);
+
+            var result = new int[256];
+            for (var x = 0; x < 256; x++) result[x] = decoded.At<Vec3b>(4, x).Item0;
+            return result;
+        }
+
+        var identity = Apply(0);
+        Check("コントラスト 0 は素通り", Enumerable.Range(0, 256).All(x => identity[x] == x),
+            $"0->{identity[0]} 255->{identity[255]}");
+
+        // 2^(-1) = 0.5 倍。0 と 255 が中心 127.5 に向かって半分だけ寄る
+        var down = Apply(-100);
+        Check("コントラスト -100 は 0.5 倍（64〜191 に収まる）",
+            down[0] == 64 && down[255] == 191, $"0->{down[0]} 255->{down[255]}");
+        Check("コントラスト -100 でも階調が消えない",
+            down.Distinct().Count() > 100, $"{down.Distinct().Count()} 段階");
+
+        // 2^(1) = 2 倍。中心から離れた側は飽和する
+        var up = Apply(100);
+        Check("コントラスト 100 は 2 倍（両端が飽和）",
+            up[0] == 0 && up[255] == 255 && up[64] == 0 && up[192] == 255,
+            $"0->{up[0]} 64->{up[64]} 192->{up[192]} 255->{up[255]}");
+
+        // 倍率が対称であること。中心からの距離が -100 で半分、+100 で 2 倍
+        var half = Math.Abs(down[255] - 127.5);
+        var whole = Math.Abs(identity[255] - 127.5);
+        Check("負方向の倍率がちょうど半分", Math.Abs(half * 2 - whole) <= 1.0, $"{half} と {whole}");
+
+        DeleteWithRetry(root);
+    }
+
     private static void TestRenderEncodeAgreement()
     {
         Console.WriteLine();
