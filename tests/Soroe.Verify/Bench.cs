@@ -40,8 +40,22 @@ internal static class Bench
         Directory.CreateDirectory(work);
 
         Console.WriteLine($"Soroe 性能測定  {DateTime.Now:yyyy-MM-dd HH:mm}");
-        Console.WriteLine($"構成: {Configuration}  繰り返し {Repeat} 回の中央値（最初の {Warmup} 回は捨てる）");
+        Console.WriteLine($"  CPU:  {ProcessorName}（論理 {Environment.ProcessorCount} 個）");
+        Console.WriteLine($"  OS:   {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
+        Console.WriteLine(
+            $"  構成: {Configuration} / {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}"
+            + $"  繰り返し {Repeat} 回の中央値（最初の {Warmup} 回は捨てる）");
         Console.WriteLine();
+        Console.WriteLine("  ここに出る絶対値は測定した機械に依存する。別の環境で比べるときは、");
+        Console.WriteLine("  値そのものではなく比率（圧縮率どうしの関係、形式ごとの桁の違い）で見ること。");
+        Console.WriteLine("  Debug で測ると画像処理以外の部分が重くなる。判断には Release を使う。");
+        Console.WriteLine();
+
+        if (Configuration != "Release")
+        {
+            Console.WriteLine("  ※ Release ではない。判断に使う数字は -c Release で測り直すこと。");
+            Console.WriteLine();
+        }
 
         var photo = Path.Combine(work, "photo.png");
         if (samplePath is not null && File.Exists(samplePath))
@@ -85,6 +99,35 @@ internal static class Bench
 #else
         "Release";
 #endif
+
+    /// <summary>
+    /// CPU の名前。取れなければ分かる範囲で返す。
+    /// </summary>
+    /// <remarks>
+    /// .NET に CPU 名を取る API は無い。Windows ではレジストリに製品名が入っているので
+    /// そこから読む。読めない場合は環境変数（型番の情報しか無いが無いよりよい）に落とす。
+    /// </remarks>
+    private static string ProcessorName
+    {
+        get
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                    @"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+                if (key?.GetValue("ProcessorNameString") is string name && name.Length > 0)
+                {
+                    return name.Trim();
+                }
+            }
+            catch (Exception)
+            {
+                // 権限やプラットフォームの都合で読めないことがある。測定は続ける
+            }
+
+            return Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER") ?? "不明";
+        }
+    }
 
     /// <summary>出力形式ごとの、書き出し 1 枚あたりの時間。</summary>
     private static void BenchFormats(ImageRenderer renderer, string photo, string work)
