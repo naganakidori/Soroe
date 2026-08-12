@@ -22,6 +22,20 @@ public sealed class FractionConverter : IValueConverter
     /// <summary>親に対する割合の既定値。<c>ConverterParameter</c> で上書きできる。</summary>
     public double Fraction { get; set; } = 0.5;
 
+    /// <summary>
+    /// 親の残りとして必ず空けておく長さ。同じ場所を分け合う相手のための下限。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Minimum" /> は「自分が小さくなりすぎない」下限で、これは
+    /// 「相手が小さくなりすぎない」下限。割合を上げるとその効きは窓が低いときに
+    /// 集中するため、割合だけでは相手を潰しきってしまう。
+    /// <para>
+    /// 両方を満たせないほど親が小さい場合は <see cref="Minimum" /> を優先する。
+    /// 分け合う場所そのものが足りないので、どちらかは必ず割り込む。
+    /// </para>
+    /// </remarks>
+    public double Reserve { get; set; }
+
     /// <inheritdoc />
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
@@ -35,7 +49,7 @@ public sealed class FractionConverter : IValueConverter
             ? parsed
             : Fraction;
 
-        return Math.Max(Minimum, length * fraction);
+        return Math.Max(Minimum, Math.Min(length * fraction, length - Reserve));
     }
 
     /// <inheritdoc />

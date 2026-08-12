@@ -28,6 +28,7 @@ internal static class Program
         TestOrdering();
         TestRendering();
         TestSpinner();
+        TestWindowFit();
         TestCloneCompleteness();
         TestResolveSize();
         TestResize();
@@ -291,6 +292,54 @@ internal static class Program
         spinner.Value = 0;
         spinner.Minimum = 10;
         Check("範囲を変えたら現在値も追従する", spinner.Value == 10, $"{spinner.Value}");
+    }
+
+    /// <summary>
+    /// 既定ウィンドウサイズを作業領域へ丸める判定を検証する。
+    /// </summary>
+    /// <remarks>
+    /// 開発機の作業領域が広いと縮める側の経路を一度も通らないため、実機の画面では
+    /// 確かめられない。数値を渡して判定だけを見る。
+    /// </remarks>
+    private static void TestWindowFit()
+    {
+        Console.WriteLine();
+
+        // XAML の既定値と最小値。ここが変わったら測り直すこと
+        const double DefaultWidth = 1100;
+        const double DefaultHeight = 990;
+        const double MinWidth = 720;
+        const double MinHeight = 600;
+
+        static (double Width, double Height) Fit(double workWidth, double workHeight) =>
+            Soroe.Views.MainWindow.FitToWorkArea(
+                DefaultWidth, DefaultHeight, MinWidth, MinHeight, workWidth, workHeight);
+
+        // 1080p を 100% で使う場合。作業領域 1920x1032 に既定サイズが収まる
+        var wide = Fit(1920, 1032);
+        Check("収まる画面では既定サイズのまま",
+            wide == (DefaultWidth, DefaultHeight), $"{wide}");
+
+        // 1080p を 150% で使う場合。論理 1280x720、タスクバーを引いて 672 程度
+        var narrow = Fit(1280, 672);
+        Check("収まらない高さは作業領域まで縮める",
+            narrow == (DefaultWidth, 672), $"{narrow}");
+
+        // 幅だけが足りない場合。高さは触らない
+        var thin = Fit(1024, 1392);
+        Check("収まらない幅は作業領域まで縮める",
+            thin == (1024, DefaultHeight), $"{thin}");
+
+        // 作業領域が最小サイズより狭い場合。WPF 側で結局 MinWidth / MinHeight に
+        // 丸め直されるので、ここで下回る値を返すと表示と食い違うだけになる
+        var tiny = Fit(640, 480);
+        Check("最小サイズは作業領域より優先する",
+            tiny == (MinWidth, MinHeight), $"{tiny}");
+
+        // 広げる方向には働かないこと。大画面で既定サイズが勝手に大きくなってはいけない
+        var huge = Fit(5120, 2880);
+        Check("作業領域が広くても既定サイズは広げない",
+            huge == (DefaultWidth, DefaultHeight), $"{huge}");
     }
 
     /// <summary>

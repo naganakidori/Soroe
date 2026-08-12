@@ -10,10 +10,11 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="Soroe"
-        Height="720"
-        Width="1000"
+        Height="990"
+        Width="1100"
         MinHeight="600"
         MinWidth="720"
+        WindowStartupLocation="CenterScreen"
         AllowDrop="True"
         DragOver="OnDragOver"
         Drop="OnDrop">
@@ -26,8 +27,14 @@
             固定値ではなく右側の列の高さに対する割合で決める。
             下限は 140（見出し + 2 行程度）。ここを下回るくらい窓が低いときは、
             プレビューを削ってでも調整パネルを見せる。
+
+            Reserve はプレビューに必ず残す高さ。割合を上げた効きは窓が低いときに
+            集中するため（背の高い窓ではパネルが中身なりの高さで止まる）、
+            これが無いと最小サイズでプレビューが潰れる。実測（DPI 150%・最小サイズ
+            720x600）で、割合 0.55 のときのプレビューは約 179 だったが、0.70 では
+            約 119 まで縮んだ。160 はその手前に置いてある。
         -->
-        <converters:FractionConverter x:Key="PanelHeightFraction" Minimum="140" />
+        <converters:FractionConverter x:Key="PanelHeightFraction" Minimum="140" Reserve="160" />
 
         <!-- 調整パネルの分類見出し。3 分類で共通に使う -->
         <Style x:Key="SectionHeaderStyle" TargetType="TextBlock">
@@ -225,11 +232,17 @@
                         右側の列（プレビュー + 調整パネル）の高さに対する割合で決める。
                         こうすると、項目が少ないうちは中身なりの高さで収まり、
                         増えれば頭打ちになって自然にスクロールが出る。
-                        プレビューは残りをもらう側なので、割合を上げるとプレビューが縮む。
+
+                        この割合は「上限」であって「取り分」ではない。行は Auto なので、
+                        パネルは中身が必要とする高さしか取らず、余りはプレビューへ行く。
+                        実測（DPI 150%・9 項目・窓 1000x1000）で、割合 0.75 のときの
+                        見えている高さは 0.75 x 798.7 = 599 ではなく、中身と同じ 550.4 で
+                        頭打ちになった。つまり割合を上げても、パネルが実際に必要とするまで
+                        プレビューは縮まない。縮むのは中身が収まりきらない低い窓のときだけ。
                     -->
                     <ScrollViewer MaxHeight="{Binding ActualHeight, ElementName=PreviewAndPanel,
                                               Converter={StaticResource PanelHeightFraction},
-                                              ConverterParameter=0.55}"
+                                              ConverterParameter=0.70}"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                     <!--

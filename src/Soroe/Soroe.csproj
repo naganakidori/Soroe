@@ -23,6 +23,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      検証ハーネスからは internal も見えるようにする。層の分離はフォルダ分けと
+      internal で守る方針だが、検証はその外側から使う相手ではなく、中を直接
+      つついて確かめるためのものなので、公開範囲を広げてまで検証可能にはしない。
+    -->
+    <InternalsVisibleTo Include="Soroe.Verify" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="OpenCvSharp4.Extensions" Version="4.13.0.20260627" />
     <PackageReference Include="OpenCvSharp4.Windows" Version="4.13.0.20260627" />

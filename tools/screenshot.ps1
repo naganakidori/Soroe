@@ -16,11 +16,15 @@
 #
 # 出力先は絶対パスで渡すこと。相対パスは実行時の作業フォルダ（多くはリポジトリ
 # 直下）に解決され、成果物がリポジトリに紛れ込む。
+#
+#   -Width / -Height を省略するとアプリの既定サイズのまま撮る。既定サイズは
+#   作業領域に合わせて実行時に縮まることがあるので、数値で指定すると
+#   「既定サイズの確認」にならない。
 param(
   [Parameter(Mandatory = $true)][string]$Exe,
   [Parameter(Mandatory = $true)][string]$Out,
-  [int]$Width = 1000,
-  [int]$Height = 720,
+  [int]$Width = 0,
+  [int]$Height = 0,
   [string[]]$ExeArgs = @(),
   [switch]$ScrollEnd,
   [switch]$Maximize
@@ -117,7 +121,7 @@ try {
 
   if ($Maximize) {
     [void][WindowShot]::ShowWindow($h, [WindowShot]::SW_MAXIMIZE)
-  } else {
+  } elseif ($Width -gt 0 -and $Height -gt 0) {
     [void][WindowShot]::MoveWindow($h, 80, 80, [int]($Width * $scale), [int]($Height * $scale), $true)
   }
 
