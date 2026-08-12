@@ -235,14 +235,20 @@
 
                         この割合は「上限」であって「取り分」ではない。行は Auto なので、
                         パネルは中身が必要とする高さしか取らず、余りはプレビューへ行く。
-                        実測（DPI 150%・9 項目・窓 1000x1000）で、割合 0.75 のときの
-                        見えている高さは 0.75 x 798.7 = 599 ではなく、中身と同じ 550.4 で
-                        頭打ちになった。つまり割合を上げても、パネルが実際に必要とするまで
-                        プレビューは縮まない。縮むのは中身が収まりきらない低い窓のときだけ。
+                        実測（DPI 150%・窓 1000x1000）で、割合 0.75 のときの見えている高さは
+                        0.75 x 798.7 = 599 ではなく、中身と同じ高さで頭打ちになった。
+                        つまり割合を上げても、パネルが実際に必要とするまでプレビューは縮まない。
+                        縮むのは中身が収まりきらない低い窓のときだけ。
+
+                        0.75 という値は、既定サイズ（1100x990）で 9 項目が収まる下限から決めた。
+                        実測で 9 項目の中身は 583.0 あり、見えている高さは
+                        割合 x (窓の高さ - 201.3)。0.70 では 552.2 しか見えず 30.8 はみ出した。
+                        なお最小サイズなど低い窓では Reserve のほうが先に効くため、
+                        0.70 から 0.75 へ上げてもそちらの見え方は変わらない。
                     -->
                     <ScrollViewer MaxHeight="{Binding ActualHeight, ElementName=PreviewAndPanel,
                                               Converter={StaticResource PanelHeightFraction},
-                                              ConverterParameter=0.70}"
+                                              ConverterParameter=0.75}"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
                     <!--
@@ -259,12 +265,33 @@
                               2. 画素値を変える     … 明るさ、コントラスト、彩度、
                                                       グレースケール、二値化、シャープ
                               3. 描き足す           … 枠線
-                            残りの分類は、この StackPanel と同じ形（見出し + 項目行）を
-                            この前後に足す。現在は 2 のうち明るさのみ実装している。
                         -->
                         <TextBlock Text="キャンバスを変える" Style="{StaticResource SectionHeaderStyle}" />
 
                         <!-- 窓が狭いときは折り返す。横一列に固定すると右端が切れて読めなくなる -->
+                        <WrapPanel Margin="0,0,0,12">
+                            <CheckBox Content="回転"
+                                      MinWidth="92"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.Rotation.Enabled}" />
+
+                            <!--
+                                90 度単位のみ。任意角度は入れない（理由は RotationAngle）。
+                                「回転しない」はチェックボックスが持つので候補に入れない
+                            -->
+                            <ComboBox MinWidth="140"
+                                      VerticalAlignment="Center"
+                                      ItemsSource="{Binding RotationChoices}"
+                                      DisplayMemberPath="Label"
+                                      SelectedValuePath="Angle"
+                                      SelectedValue="{Binding Settings.Rotation.Angle}"
+                                      IsEnabled="{Binding Settings.Rotation.Enabled}" />
+
+                            <TextBlock Text="回す"
+                                       Margin="6,0,0,0"
+                                       VerticalAlignment="Center" />
+                        </WrapPanel>
+
                         <WrapPanel Margin="0,0,0,4">
                             <CheckBox Content="リサイズ"
                                       MinWidth="92"
@@ -469,6 +496,60 @@
                             縮小表示の件は、シャープが空間フィルタであることから来る一般的な制約。
                         -->
                         <TextBlock Text="二値化と同時に有効にすると効果はありません。効き目は出力サイズに対して決まるため、縮小表示のプレビューでは分かりにくいことがあります"
+                                   Margin="28,2,0,12"
+                                   Opacity="0.6"
+                                   TextWrapping="Wrap" />
+
+                        <TextBlock Text="描き足す" Style="{StaticResource SectionHeaderStyle}" />
+
+                        <Grid Style="{StaticResource AdjustmentRowStyle}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <CheckBox Grid.Column="0"
+                                      Content="枠線"
+                                      MinWidth="92"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.Frame.Enabled}" />
+
+                            <Slider Grid.Column="1"
+                                    Style="{StaticResource AdjustmentSliderStyle}"
+                                    Minimum="{Binding Source={x:Static models:FrameOption.MinThickness}, Mode=OneTime}"
+                                    Maximum="{Binding Source={x:Static models:FrameOption.MaxThickness}, Mode=OneTime}"
+                                    IsEnabled="{Binding Settings.Frame.Enabled}"
+                                    Value="{Binding Settings.Frame.Thickness}" />
+
+                            <controls:NumericSpinner Grid.Column="2"
+                                                     VerticalAlignment="Center"
+                                                     Minimum="{x:Static models:FrameOption.MinThickness}"
+                                                     Maximum="{x:Static models:FrameOption.MaxThickness}"
+                                                     IsEnabled="{Binding Settings.Frame.Enabled}"
+                                                     Value="{Binding Settings.Frame.Thickness}" />
+                        </Grid>
+
+                        <WrapPanel Margin="28,2,0,4">
+                            <TextBlock Text="色"
+                                       Margin="0,0,6,0"
+                                       VerticalAlignment="Center" />
+
+                            <ComboBox MinWidth="120"
+                                      VerticalAlignment="Center"
+                                      ItemsSource="{Binding FrameColorChoices}"
+                                      DisplayMemberPath="Label"
+                                      SelectedValuePath="Color"
+                                      SelectedValue="{Binding Settings.Frame.Color}"
+                                      IsEnabled="{Binding Settings.Frame.Enabled}" />
+                        </WrapPanel>
+
+                        <!--
+                            内側に描くことを断る。外側に足すとリサイズの指定（長辺 N）が
+                            破れるので内側にしてあるが、外周が隠れること自体は目に見えるので、
+                            先に書いておく。太さの上限は寸法表示の行に出る
+                        -->
+                        <TextBlock Text="画像の内側に描きます。外周が少し隠れますが、出力サイズは変わりません"
                                    Margin="28,2,0,4"
                                    Opacity="0.6"
                                    TextWrapping="Wrap" />

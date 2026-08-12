@@ -35,6 +35,7 @@ internal static class Program
         TestToneCurve();
         TestMonochrome();
         TestSharpen();
+        TestRotationAndFrame();
         TestCanonicalImage();
         TestRenderEncodeAgreement();
         TestExport();
@@ -245,6 +246,59 @@ internal static class Program
         vm.Settings.Resize.Enabled = false;
         Check("リサイズ無効に戻すと元の寸法のみ",
             !vm.PreviewSizeText.Contains("→"), vm.PreviewSizeText);
+
+        // 回転は適用順序 1 番目なので、リサイズも寸法表示も回転後を基準にしなければ
+        // 実際の出力と食い違う。4000x2000 を 90 度回せば 2000x4000 になる
+        vm.Settings.Rotation.Enabled = true;
+        vm.Settings.Rotation.Angle = RotationAngle.Clockwise90;
+        Check("回転 90 度で寸法表示の縦横が入れ替わる",
+            vm.PreviewSizeText.Contains("→") && vm.PreviewSizeText.Contains("2000 × 4000"),
+            vm.PreviewSizeText);
+
+        vm.Settings.Resize.Enabled = true;
+        vm.Settings.Resize.LongestEdge = 1920;
+        Check("回転後の寸法にリサイズが掛かる（長辺 4000 → 1920）",
+            vm.PreviewSizeText.Contains("960 × 1920"), vm.PreviewSizeText);
+
+        vm.Settings.Rotation.Angle = RotationAngle.Half;
+        Check("180 度なら縦横は入れ替わらない",
+            vm.PreviewSizeText.Contains("1920 × 960"), vm.PreviewSizeText);
+
+        vm.Settings.Rotation.Enabled = false;
+        vm.Settings.Resize.Enabled = false;
+
+        // 枠線の太さは「有効な間は常に」出す。上限に当たったときだけ出す形にすると、
+        // 出ていない状態が「指定どおり」なのか「表示の条件を満たしていない」のか
+        // 区別できなくなる
+        Check("枠線が無効なら太さは出さない",
+            !vm.PreviewSizeText.Contains("枠線"), vm.PreviewSizeText);
+
+        vm.Settings.Frame.Enabled = true;
+        vm.Settings.Frame.Thickness = 40;
+        Check("枠線が有効なら上限内でも太さを出す",
+            vm.PreviewSizeText.Contains("枠線 40px") && !vm.PreviewSizeText.Contains("上限"),
+            vm.PreviewSizeText);
+
+        // 4000x2000 の短辺は 2000。1/4 は 500 なので、それを超えると頭打ちになる
+        vm.Settings.Frame.Thickness = FrameOption.MaxThickness;
+        Check("上限内なら最大値でもそのまま出る",
+            vm.PreviewSizeText.Contains($"枠線 {FrameOption.MaxThickness}px")
+                && !vm.PreviewSizeText.Contains("上限"),
+            vm.PreviewSizeText);
+
+        // 出力を小さくすれば頭打ちに当たる。長辺 400 なら短辺 200、1/4 は 50
+        vm.Settings.Resize.Enabled = true;
+        vm.Settings.Resize.LongestEdge = 400;
+        Check("頭打ちに当たったら実際の太さと（上限）を出す",
+            vm.PreviewSizeText.Contains("枠線 50px（上限）"), vm.PreviewSizeText);
+
+        vm.Settings.Frame.Thickness = 20;
+        Check("頭打ちを下回れば（上限）が消える",
+            vm.PreviewSizeText.Contains("枠線 20px") && !vm.PreviewSizeText.Contains("上限"),
+            vm.PreviewSizeText);
+
+        vm.Settings.Frame.Enabled = false;
+        vm.Settings.Resize.Enabled = false;
 
         // 縮小されていても明るさは同じだけ効く（画素値は倍率の影響を受けない）
         Check("縮小後でも明るさは同じだけ効く", Center(vm) == 150, $"{Center(vm)}");
@@ -1557,8 +1611,71 @@ internal static class Program
             s.Sharpen.Value = 0;
         })));
 
+        // 上の一致は 320x240 の標本で確かめている。この寸法は CanonicalEdge 以下なので
+        // しきい値は「速い経路」で決まる。原寸が CanonicalEdge を超えると書き出しは
+        // 「遅い経路」（canonical へ縮めてチェーンを流し直す）に入るため、
+        // 二値化より後ろの項目を外し忘れていると、ここで初めてしきい値がずれる。
+        // 実際にずれていた（実測でしきい値 126 が 127 になり、0.87% の画素が反転する）
+        var big = Path.Combine(root, "big.png");
+        WriteDetailed(big, 2000, 1500);
+
+        byte[] RunBig(Action<ProcessingSettings> configure)
+        {
+            var settings = new ProcessingSettings();
+            configure(settings);
+            using var source = renderer.Load(big, 0);
+            return renderer.Encode(source!, settings, source!.Scale, new EncodeSettings { Extension = ".png" });
+        }
+
+        var bigBinarize = RunBig(s => s.Binarize.Enabled = true);
+        var bigBinarizeSharpen = RunBig(s =>
+        {
+            s.Binarize.Enabled = true;
+            s.Sharpen.Enabled = true;
+            s.Sharpen.Value = 100;
+        });
+        Check("原寸が canonical を超えても、二値化 ON でシャープは 1 画素も変えない",
+            bigBinarize.SequenceEqual(bigBinarizeSharpen));
+
         CheckSharpenScaleAgreement(renderer, root);
         DeleteWithRetry(root);
+    }
+
+    /// <summary>
+    /// 細部が一面にある標本を書く。大津のしきい値が動きうる形にする。
+    /// </summary>
+    /// <remarks>
+    /// <b>標本の選び方がそのまま検出力になる。</b>明暗がはっきり分かれた画像は
+    /// ヒストグラムの谷が深く、シャープや枠線でヒストグラムが多少動いても大津の値は
+    /// 変わらない。実際、明暗 2 領域の標本ではしきい値の食い違いを 1 件も捕まえられなかった。
+    /// 細部が一面にあると分布が広がり、後段の項目が混ざれば値が動く。
+    /// </remarks>
+    /// <remarks>
+    /// <b>種の細かさが検出力を決める。実測して選ぶこと。</b>「しきい値の計算に後段が
+    /// 混ざる」不具合を捕まえるには、(1) 混ざるとしきい値が動き、(2) 動いた結果が
+    /// 原寸の二値化で実際に画素を反転させる、の両方が要る。この 2 つは逆を向く —
+    /// ヒストグラムの谷が深い画像は (1) は起きても (2) が起きない。
+    /// <para>
+    /// 実測（2000x1500 を canonical 1600x1200 へ縮小、大津の値と原寸での反転率）。
+    /// </para>
+    /// <list type="bullet">
+    /// <item>種 500x375（現在）… シャープで 126→127 / 0.87% 反転、枠線 40px で 126→152 / 21.9% 反転</item>
+    /// <item>種 160x120 … シャープで動かず 0%、枠線では 126→151 / 21.0% 反転</item>
+    /// <item>明暗 2 領域 … シャープで 105→89 と大きく動くのに反転率 0%（谷が広く、
+    /// どちらのしきい値でも同じ結果になる）</item>
+    /// </list>
+    /// 最後の 2 つは実際に素通りした。<b>しきい値が動いたことと、結果が変わることは別である。</b>
+    /// </remarks>
+    private static void WriteDetailed(string path, int width, int height)
+    {
+        using var seed = new Mat(375, 500, MatType.CV_8UC3);
+        Cv2.Randu(seed, Scalar.All(0), Scalar.All(255));
+
+        using var mat = new Mat();
+        Cv2.Resize(seed, mat, new OpenCvSharp.Size(width, height), 0, 0, InterpolationFlags.Cubic);
+
+        Cv2.ImEncode(".png", mat, out var png, [(int)ImwriteFlags.PngCompression, 1]);
+        File.WriteAllBytes(path, png);
     }
 
     /// <summary>
@@ -1608,6 +1725,271 @@ internal static class Program
         var (mean, max) = Difference(rendered, shrunk);
         Check($"シャープの効きがプレビューと書き出しで揃う（平均差 {mean:F3} / 最大差 {max}）",
             mean <= MaxSharpenMeanDifference, $"閾値 {MaxSharpenMeanDifference}");
+    }
+
+    /// <summary>
+    /// 回転（適用順序 1）と枠線（適用順序 8）。
+    /// </summary>
+    /// <remarks>
+    /// 中心は<b>チェーン全体が 90 度回転と可換であること</b>。回転が並べ替えでしかない以上、
+    /// 「回転 → 全チェーン」と「全チェーン → 回転」は全画素一致するはずで、崩れたら
+    /// どの項目が回転と噛み合わなくなったかがそのまま分かる。
+    /// </remarks>
+    private static void TestRotationAndFrame()
+    {
+        Console.WriteLine();
+
+        var root = Path.Combine(Path.GetTempPath(), "soroe_vmtest_frame");
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+        Directory.CreateDirectory(root);
+
+        // --- 値の丸め ---
+        var rotation = new RotationOption { Angle = (RotationAngle)45 };
+        Check("列挙に無い角度は既定へ丸める",
+            rotation.Angle == RotationAngle.Clockwise90, $"{rotation.Angle}");
+
+        rotation.Angle = RotationAngle.CounterClockwise90;
+        Check("列挙にある角度はそのまま入る",
+            rotation.Angle == RotationAngle.CounterClockwise90, $"{rotation.Angle}");
+
+        var frame = new FrameOption { Thickness = 9999 };
+        Check("太さは上限で丸める", frame.Thickness == FrameOption.MaxThickness, $"{frame.Thickness}");
+        frame.Thickness = -5;
+        Check("太さは下限で丸める", frame.Thickness == FrameOption.MinThickness, $"{frame.Thickness}");
+
+        // --- 回転後の寸法 ---
+        Check("回転が無効なら寸法はそのまま",
+            new RotationOption().ResolveSize(4000, 3000) == (4000, 3000));
+
+        rotation.Enabled = true;
+        rotation.Angle = RotationAngle.Clockwise90;
+        Check("右に 90 度で縦横が入れ替わる",
+            rotation.ResolveSize(4000, 3000) == (3000, 4000), $"{rotation.ResolveSize(4000, 3000)}");
+
+        rotation.Angle = RotationAngle.CounterClockwise90;
+        Check("左に 90 度でも縦横が入れ替わる",
+            rotation.ResolveSize(4000, 3000) == (3000, 4000), $"{rotation.ResolveSize(4000, 3000)}");
+
+        rotation.Angle = RotationAngle.Half;
+        Check("180 度では入れ替わらない",
+            rotation.ResolveSize(4000, 3000) == (4000, 3000), $"{rotation.ResolveSize(4000, 3000)}");
+
+        // --- 太さの頭打ち ---
+        frame.Thickness = 200;
+        Check("枠線が無効なら太さは 0", frame.ResolveThickness(1920, 1440) == 0);
+
+        frame.Enabled = true;
+        Check("太さは出力の短辺の 1/4 で頭打ち",
+            frame.ResolveThickness(1920, 400) == 100, $"{frame.ResolveThickness(1920, 400)}");
+
+        frame.Thickness = 16;
+        Check("上限内の太さはそのまま",
+            frame.ResolveThickness(1920, 1440) == 16, $"{frame.ResolveThickness(1920, 1440)}");
+
+        Check("短辺が極端に小さくても 1px は描く",
+            frame.ResolveThickness(40, 3) == 1, $"{frame.ResolveThickness(40, 3)}");
+
+        // --- 実際に描かれる枠線 ---
+        var renderer = new ImageRenderer();
+        var plainPath = Path.Combine(root, "plain.png");
+        WriteFlat(plainPath, 200, 120, 90);
+
+        Mat RunFrame(Action<ProcessingSettings> configure)
+        {
+            var settings = new ProcessingSettings();
+            configure(settings);
+            using var source = renderer.Load(plainPath, 0);
+            var bytes = renderer.Encode(
+                source!, settings, source!.Scale, new EncodeSettings { Extension = ".png" });
+            return Cv2.ImDecode(bytes, ImreadModes.Color);
+        }
+
+        const int Thickness = 10;
+        using (var framed = RunFrame(s =>
+        {
+            s.Frame.Enabled = true;
+            s.Frame.Thickness = Thickness;
+            s.Frame.Color = FrameColor.White;
+        }))
+        {
+            Check("枠線を描いても出力寸法は変わらない",
+                framed.Width == 200 && framed.Height == 120, $"{framed.Width}x{framed.Height}");
+
+            var corners = new[]
+            {
+                framed.Get<Vec3b>(0, 0),
+                framed.Get<Vec3b>(0, framed.Width - 1),
+                framed.Get<Vec3b>(framed.Height - 1, 0),
+                framed.Get<Vec3b>(framed.Height - 1, framed.Width - 1),
+            };
+            Check("四隅が枠線の色になる",
+                corners.All(c => c.Item0 == 255 && c.Item1 == 255 && c.Item2 == 255));
+
+            // 太さちょうどの内側は元の画素のまま。ここがずれると内側描画になっていない
+            var inside = new[]
+            {
+                framed.Get<Vec3b>(Thickness, Thickness),
+                framed.Get<Vec3b>(Thickness, framed.Width - Thickness - 1),
+                framed.Get<Vec3b>(framed.Height - Thickness - 1, Thickness),
+                framed.Get<Vec3b>(60, 100),
+            };
+            Check("太さちょうどの内側は元の画素のまま",
+                inside.All(c => c.Item0 == 90 && c.Item1 == 90 && c.Item2 == 90));
+
+            // 枠線の内側 1px は枠線。4 辺すべてが塗られていることの確認
+            var edges = new[]
+            {
+                framed.Get<Vec3b>(Thickness - 1, 100),
+                framed.Get<Vec3b>(framed.Height - Thickness, 100),
+                framed.Get<Vec3b>(60, Thickness - 1),
+                framed.Get<Vec3b>(60, framed.Width - Thickness),
+            };
+            Check("上下左右の 4 辺が塗られる",
+                edges.All(c => c.Item0 == 255 && c.Item1 == 255 && c.Item2 == 255));
+        }
+
+        foreach (var (color, expected) in new[]
+        {
+            (FrameColor.Black, (byte)0),
+            (FrameColor.Gray, (byte)128),
+        })
+        {
+            using var framed = RunFrame(s =>
+            {
+                s.Frame.Enabled = true;
+                s.Frame.Thickness = Thickness;
+                s.Frame.Color = color;
+            });
+
+            var pixel = framed.Get<Vec3b>(0, 0);
+            Check($"色 {color} で塗られる",
+                pixel.Item0 == expected && pixel.Item1 == expected && pixel.Item2 == expected,
+                $"{pixel.Item0}");
+        }
+
+        // --- 枠線がしきい値を汚さない ---
+        // 枠線は順序 8 で二値化（順序 6）より後ろなので、しきい値の計算に混ざっては
+        // いけない。混ざると、暗い画像に白い枠を付けるだけで二値化の結果が変わる。
+        // 原寸が canonical を超える標本でなければ「遅い経路」を通らず検出できない
+        var bigPath = Path.Combine(root, "big.png");
+        WriteDetailed(bigPath, 2000, 1500);
+
+        byte[] RunBig(Action<ProcessingSettings> configure)
+        {
+            var settings = new ProcessingSettings();
+            configure(settings);
+            using var source = renderer.Load(bigPath, 0);
+            return renderer.Encode(
+                source!, settings, source!.Scale, new EncodeSettings { Extension = ".png" });
+        }
+
+        using (var binarized = Cv2.ImDecode(RunBig(s => s.Binarize.Enabled = true), ImreadModes.Color))
+        using (var withFrame = Cv2.ImDecode(
+            RunBig(s =>
+            {
+                s.Binarize.Enabled = true;
+                s.Frame.Enabled = true;
+                s.Frame.Thickness = 40;
+                s.Frame.Color = FrameColor.White;
+            }),
+            ImreadModes.Color))
+        {
+            // 枠線の内側だけを比べる。枠線そのものは当然違う
+            var inner = new OpenCvSharp.Rect(60, 60, binarized.Width - 120, binarized.Height - 120);
+            using var a = binarized.SubMat(inner);
+            using var b = withFrame.SubMat(inner);
+            using var diff = new Mat();
+            Cv2.Absdiff(a, b, diff);
+
+            Check("枠線は二値化のしきい値を変えない",
+                Cv2.CountNonZero(diff.Reshape(1)) == 0,
+                $"{Cv2.CountNonZero(diff.Reshape(1))} 要素が違う");
+        }
+
+        CheckRotationCommutes(renderer, bigPath);
+        DeleteWithRetry(root);
+    }
+
+    /// <summary>
+    /// チェーン全体が 90 度回転と可換であることを確かめる。
+    /// </summary>
+    /// <remarks>
+    /// 回転は適用順序 1 番目なので、以降の全項目が回転後の画像を前提にする。
+    /// 90 度単位の回転は画素の並べ替えでしかないため、理屈のうえでは
+    /// 「回転 → 全チェーン」と「全チェーン → 回転」は一致しなければならない。
+    /// <list type="bullet">
+    /// <item>リサイズ … 長辺は回転で変わらないので、出力寸法は転置になるだけ</item>
+    /// <item>明るさ / コントラスト / 彩度 / グレースケール … 1 画素だけを見るので自明</item>
+    /// <item>二値化 … しきい値はヒストグラムから決まり、並べ替えでは変わらない</item>
+    /// <item>シャープ … ガウシアンは等方で x / y 同一のカーネル</item>
+    /// <item>枠線 … 4 辺に一様な幅で描く</item>
+    /// </list>
+    /// <b>1 つでも噛み合わなくなればここで落ちる。</b>回転を足したこと自体より、
+    /// 後から他の項目を触ったときの網になることを狙って常設する。
+    /// </remarks>
+    private static void CheckRotationCommutes(ImageRenderer renderer, string path)
+    {
+        byte[] Run(Action<ProcessingSettings> configure)
+        {
+            var settings = new ProcessingSettings();
+
+            // 寸法・画素値・空間フィルタ・描き足しを全部通す
+            settings.Resize.Enabled = true;
+            settings.Resize.LongestEdge = 1280;
+            settings.Brightness.Enabled = true;
+            settings.Brightness.Value = 20;
+            settings.Contrast.Enabled = true;
+            settings.Contrast.Value = 40;
+            settings.Saturation.Enabled = true;
+            settings.Saturation.Value = 60;
+            settings.Sharpen.Enabled = true;
+            settings.Sharpen.Value = 80;
+            settings.Frame.Enabled = true;
+            settings.Frame.Thickness = 24;
+            settings.Frame.Color = FrameColor.Gray;
+            configure(settings);
+
+            using var source = renderer.Load(path, 0);
+            return renderer.Encode(
+                source!, settings, source!.Scale, new EncodeSettings { Extension = ".png" });
+        }
+
+        using var plain = Cv2.ImDecode(Run(_ => { }), ImreadModes.Color);
+
+        foreach (var (angle, flag) in new[]
+        {
+            (RotationAngle.Clockwise90, RotateFlags.Rotate90Clockwise),
+            (RotationAngle.Half, RotateFlags.Rotate180),
+            (RotationAngle.CounterClockwise90, RotateFlags.Rotate90Counterclockwise),
+        })
+        {
+            using var rotatedFirst = Cv2.ImDecode(
+                Run(s =>
+                {
+                    s.Rotation.Enabled = true;
+                    s.Rotation.Angle = angle;
+                }),
+                ImreadModes.Color);
+
+            using var rotatedLast = new Mat();
+            Cv2.Rotate(plain, rotatedLast, flag);
+
+            var sameSize = rotatedFirst.Width == rotatedLast.Width
+                && rotatedFirst.Height == rotatedLast.Height;
+
+            var different = -1;
+            if (sameSize)
+            {
+                using var diff = new Mat();
+                Cv2.Absdiff(rotatedFirst, rotatedLast, diff);
+                different = Cv2.CountNonZero(diff.Reshape(1));
+            }
+
+            Check($"{angle}: 回転 → チェーン と チェーン → 回転 が全画素一致",
+                sameSize && different == 0,
+                sameSize ? $"{different} 要素が違う" : $"寸法が違う（{rotatedFirst.Width}x{rotatedFirst.Height}"
+                    + $" と {rotatedLast.Width}x{rotatedLast.Height}）");
+        }
     }
 
     /// <summary>

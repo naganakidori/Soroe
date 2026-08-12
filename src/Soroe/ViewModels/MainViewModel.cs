@@ -177,6 +177,30 @@ public sealed partial class MainViewModel : ObservableObject
     /// </remarks>
     public bool IsResizeFreeInput => SelectedResizePreset is { LongestEdge: null };
 
+    /// <summary>回転のドロップダウンに並べる候補。</summary>
+    /// <remarks>
+    /// 「回転しない」は入れない。チェックボックスがその役目を持っているので、
+    /// 入れると「回転しない」の言い方が 2 つできる。
+    /// <para>
+    /// 270 ではなく「左に 90°」と書く。時計回りの度数は内部の表現であって、
+    /// 画面で読むものではない。
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<RotationChoice> RotationChoices { get; } =
+    [
+        new(RotationAngle.Clockwise90, "右に 90°"),
+        new(RotationAngle.Half, "180°"),
+        new(RotationAngle.CounterClockwise90, "左に 90°"),
+    ];
+
+    /// <summary>枠線の色のドロップダウンに並べる候補。</summary>
+    public IReadOnlyList<FrameColorChoice> FrameColorChoices { get; } =
+    [
+        new(FrameColor.White, "白"),
+        new(FrameColor.Black, "黒"),
+        new(FrameColor.Gray, "グレー"),
+    ];
+
     /// <summary>
     /// 書き出しの設定。
     /// </summary>
@@ -312,6 +336,16 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>
     /// 選択中の 1 枚について、元の寸法と出力寸法の表示を作り直す。
     /// </summary>
+    /// <remarks>
+    /// 寸法は<b>回転を通した後</b>で求める。回転は適用順序 1 番目なので、90 度回すと
+    /// 縦横が入れ替わり、回転前の寸法にリサイズを掛けた値は実際の出力と食い違う。
+    /// <para>
+    /// 枠線が有効な間は太さもここに出す。<b>上限に当たったときだけ出す形にはしない。</b>
+    /// 常に出ていれば「16px と指定して 16px と表示される」状態が基準になり、そこから
+    /// 変わったときに気づける。上限のときだけ出す形だと、出ていない状態が
+    /// 「指定どおり」なのか「表示する条件を満たしていない」のか区別できない。
+    /// </para>
+    /// </remarks>
     private void UpdatePreviewSizeText()
     {
         var source = _previewSource;
@@ -321,12 +355,24 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
-        var (width, height) = Settings.Resize.ResolveSize(source.OriginalWidth, source.OriginalHeight);
+        var (rotatedWidth, rotatedHeight) =
+            Settings.Rotation.ResolveSize(source.OriginalWidth, source.OriginalHeight);
+        var (width, height) = Settings.Resize.ResolveSize(rotatedWidth, rotatedHeight);
         var original = $"{source.OriginalWidth} × {source.OriginalHeight}";
 
-        PreviewSizeText = width == source.OriginalWidth && height == source.OriginalHeight
+        var text = width == source.OriginalWidth && height == source.OriginalHeight
             ? original
             : $"{original}  →  {width} × {height}";
+
+        if (Settings.Frame.Enabled)
+        {
+            var thickness = Settings.Frame.ResolveThickness(width, height);
+            text += thickness < Settings.Frame.Thickness
+                ? $"　枠線 {thickness}px（上限）"
+                : $"　枠線 {thickness}px";
+        }
+
+        PreviewSizeText = text;
     }
 
     /// <summary>

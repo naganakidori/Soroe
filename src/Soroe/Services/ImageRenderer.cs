@@ -413,11 +413,6 @@ public sealed class ImageRenderer : IImageRenderer
     /// 6. 二値化 / 7. シャープ / 8. 枠線。
     /// </para>
     /// <para>
-    /// 現時点で実装しているのは 2. リサイズ、3. 明るさ / コントラスト、4. 彩度、
-    /// 5. グレースケール、6. 二値化、7. シャープ。残る 1. 回転と 8. 枠線は
-    /// このメソッドに順番どおり挿入していく。
-    /// </para>
-    /// <para>
     /// 寸法に関わる調整（2. リサイズ、8. 枠線の太さ）は、まず元画像に対する出力寸法を
     /// 決めてから <see cref="RenderContext.PreviewScale" /> を掛ける。画素値だけを変える
     /// 調整（明るさなど）は倍率の影響を受けない。
@@ -428,13 +423,33 @@ public sealed class ImageRenderer : IImageRenderer
         // 元画像には書き込まない。毎回コピーから作り直すので画質劣化が蓄積しない
         var result = original.Clone();
 
+        // 1. 回転
+        if (settings.Rotation.Enabled)
+        {
+            var rotated = new Mat();
+            Cv2.Rotate(result, rotated, settings.Rotation.Angle switch
+            {
+                RotationAngle.Half => RotateFlags.Rotate180,
+                RotationAngle.CounterClockwise90 => RotateFlags.Rotate90Counterclockwise,
+                _ => RotateFlags.Rotate90Clockwise,
+            });
+            result.Dispose();
+            result = rotated;
+        }
+
+        // 以降の寸法計算は回転後を基準にする。90 度回転で縦横が入れ替わるため、
+        // RenderContext が持つ回転前の寸法をそのまま使うと縦横が食い違う。
+        // 長辺は回転で変わらないのでリサイズの効き自体は同じだが、
+        // 「幅」「高さ」として使う場所は入れ替えなければならない
+        var (sourceWidth, sourceHeight) =
+            settings.Rotation.ResolveSize(context.OriginalWidth, context.OriginalHeight);
+
+        // 出力寸法。枠線の太さの頭打ちにも使うので、リサイズが無効でも求めておく
+        var (targetWidth, targetHeight) = settings.Resize.ResolveSize(sourceWidth, sourceHeight);
+
         // 2. リサイズ
         if (settings.Resize.Enabled)
         {
-            // 出力寸法は元画像の寸法から決める。倍率からの逆算はしない
-            var (targetWidth, targetHeight) =
-                settings.Resize.ResolveSize(context.OriginalWidth, context.OriginalHeight);
-
             // プレビューは既に縮小されているので、出力寸法に現在の倍率を掛けたところまで縮める。
             // 書き出し時は倍率が 1.0 なので、出力寸法そのものになる
             var width = Math.Max(1, (int)Math.Round(targetWidth * context.PreviewScale));
@@ -496,7 +511,54 @@ public sealed class ImageRenderer : IImageRenderer
             result = sharpened;
         }
 
+        // 8. 枠線
+        if (settings.Frame.Enabled)
+        {
+            // 太さは出力画素で決めてから倍率を掛ける。プレビューの寸法から
+            // 頭打ちを求めると、プレビューと書き出しで太さが変わる
+            var thickness = settings.Frame.ResolveThickness(targetWidth, targetHeight);
+            DrawFrame(result, thickness, context.PreviewScale, settings.Frame.Color);
+        }
+
         return result;
+    }
+
+    /// <summary>
+    /// 画像の内側に枠線を描く。
+    /// </summary>
+    /// <remarks>
+    /// <b>内側に描くので出力寸法は変わらない。</b>外側に足すとリサイズの指定
+    /// （長辺 N）が破れる（詳細は <see cref="FrameOption" />）。
+    /// <para>
+    /// <c>Cv2.Rectangle</c> の線幅は境界をまたいで描かれるため、塗り潰した長方形を
+    /// 4 本置く。こうすれば「内側ちょうど」であることが式から読める。
+    /// </para>
+    /// </remarks>
+    private static void DrawFrame(Mat target, int thickness, double previewScale, FrameColor color)
+    {
+        // 倍率を掛けた結果が 0 になっても、1px は描く。プレビューだけ枠線が
+        // 消えると「有効にしたのに何も起きない」という嘘になる
+        var scaled = Math.Max(1, (int)Math.Round(thickness * previewScale));
+
+        // 縮小の丸めで、倍率を掛けた太さが画像を覆いきる場合がありうる。
+        // 覆うと絵が残らないので、実際の Mat の短辺の半分で止める
+        var width = target.Width;
+        var height = target.Height;
+        scaled = Math.Max(1, Math.Min(scaled, Math.Min(width, height) / 2));
+
+        var scalar = color switch
+        {
+            FrameColor.Black => new Scalar(0, 0, 0),
+            FrameColor.Gray => new Scalar(128, 128, 128),
+            _ => new Scalar(255, 255, 255),
+        };
+
+        var middle = Math.Max(0, height - (scaled * 2));
+
+        Cv2.Rectangle(target, new Rect(0, 0, width, scaled), scalar, -1);
+        Cv2.Rectangle(target, new Rect(0, height - scaled, width, scaled), scalar, -1);
+        Cv2.Rectangle(target, new Rect(0, scaled, scaled, middle), scalar, -1);
+        Cv2.Rectangle(target, new Rect(width - scaled, scaled, scaled, middle), scalar, -1);
     }
 
     /// <summary>
@@ -600,19 +662,36 @@ public sealed class ImageRenderer : IImageRenderer
 
         using var canonicalResult = Apply(
             canonical,
-            WithoutBinarize(settings),
+            UpToBinarize(settings),
             new RenderContext(context.OriginalWidth, context.OriginalHeight, canonicalScale));
 
         return Otsu(canonicalResult);
     }
 
     /// <summary>
-    /// 二値化だけを外した写しを返す。しきい値を求めるための再帰を 1 段で止める。
+    /// しきい値を求めるための写しを返す。二値化と、それより後ろの項目を外す。
     /// </summary>
-    private static ProcessingSettings WithoutBinarize(ProcessingSettings settings)
+    /// <remarks>
+    /// 二値化を外すのは、しきい値を求める再帰を 1 段で止めるため。
+    /// <para>
+    /// <b>二値化より後ろの項目も外さなければならない。</b>速い経路
+    /// （<see cref="ResolveThreshold" /> の冒頭）が渡してくるのは 5. グレースケールまでを
+    /// 適用した画素なので、こちらだけ 7. シャープや 8. 枠線まで通すと、同じ画像に
+    /// 対して 2 つの経路が違うしきい値を出す。<b>これは実際に起きていた</b> —
+    /// プレビューは必ず速い経路を通り、書き出しは原寸が canonical を超えると
+    /// 遅い経路を通るため、シャープと二値化を同時に有効にすると両者がずれていた。
+    /// </para>
+    /// <para>
+    /// 枠線はさらに悪い。塗り潰した帯をヒストグラムに混ぜるので、暗い画像に
+    /// 白い枠を付けるだけでしきい値が動く。
+    /// </para>
+    /// </remarks>
+    private static ProcessingSettings UpToBinarize(ProcessingSettings settings)
     {
         var copy = settings.Clone();
         copy.Binarize.Enabled = false;
+        copy.Sharpen.Enabled = false;
+        copy.Frame.Enabled = false;
         return copy;
     }
 

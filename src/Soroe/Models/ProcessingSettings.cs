@@ -32,6 +32,7 @@ public sealed class ProcessingSettings
     {
         // 各項目の変更をこのクラスの 1 本のイベントにまとめる。
         // 購読側（ViewModel）が項目ごとに購読し直さずに済む。
+        Rotation.PropertyChanged += OnOptionChanged;
         Resize.PropertyChanged += OnOptionChanged;
         Brightness.PropertyChanged += OnOptionChanged;
         Contrast.PropertyChanged += OnOptionChanged;
@@ -39,6 +40,7 @@ public sealed class ProcessingSettings
         Grayscale.PropertyChanged += OnOptionChanged;
         Binarize.PropertyChanged += OnOptionChanged;
         Sharpen.PropertyChanged += OnOptionChanged;
+        Frame.PropertyChanged += OnOptionChanged;
     }
 
     /// <summary>
@@ -69,6 +71,9 @@ public sealed class ProcessingSettings
         }
     }
 
+    /// <summary>回転（適用順序 1 番目）。</summary>
+    public RotationOption Rotation { get; } = new();
+
     /// <summary>リサイズ（適用順序 2 番目）。</summary>
     public ResizeOption Resize { get; } = new();
 
@@ -90,6 +95,9 @@ public sealed class ProcessingSettings
     /// <summary>シャープ（適用順序 7 番目）。</summary>
     public SharpenOption Sharpen { get; } = new();
 
+    /// <summary>枠線（適用順序 8 番目）。</summary>
+    public FrameOption Frame { get; } = new();
+
     /// <summary>
     /// 現在の値をそのまま写した別インスタンスを返す。
     /// </summary>
@@ -101,6 +109,11 @@ public sealed class ProcessingSettings
     public ProcessingSettings Clone() => new()
     {
         SchemaVersion = SchemaVersion,
+        Rotation =
+        {
+            Enabled = Rotation.Enabled,
+            Angle = Rotation.Angle,
+        },
         Resize =
         {
             Enabled = Resize.Enabled,
@@ -127,6 +140,12 @@ public sealed class ProcessingSettings
         {
             Enabled = Sharpen.Enabled,
             Value = Sharpen.Value,
+        },
+        Frame =
+        {
+            Enabled = Frame.Enabled,
+            Thickness = Frame.Thickness,
+            Color = Frame.Color,
         },
     };
 
