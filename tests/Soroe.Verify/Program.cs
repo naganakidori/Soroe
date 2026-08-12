@@ -1438,6 +1438,14 @@ internal static class Program
     /// 帯の下には細かい雑音を置く。縮小で平均化されてヒストグラムが大きく変わるため、
     /// 経路ごとに大津を求める素朴な作りだと、ここで値が食い違う。
     /// </para>
+    /// <para>
+    /// <b>二値化より後ろの項目を有効にした組み合わせも必ず通すこと。</b>
+    /// 束 2 でこの検証を入れたときは二値化だけを有効にしていた。当時は二値化より
+    /// 後ろに項目が無かったので漏れではなかったが、束 3 でシャープ（順序 7）が
+    /// 増えたときに <c>ResolveThreshold</c> の遅い経路が後段まで通すようになり、
+    /// この検証は<b>設定の組み合わせが 1 つしかないせいで素通りした</b>。
+    /// 順序が二値化より後ろの項目を足したら、ここの組み合わせにも足す。
+    /// </para>
     /// </remarks>
     private static void CheckThresholdAgreement(ImageRenderer renderer, string root)
     {
@@ -1484,30 +1492,61 @@ internal static class Program
             File.WriteAllBytes(path, png);
         }
 
-        var settings = new ProcessingSettings();
-        settings.Binarize.Enabled = true;
-
         using var full = renderer.Load(path, 0);
         using var preview = renderer.Load(path, ImageRenderer.CanonicalEdge);
 
-        var exported = renderer.Encode(full!, settings, full!.Scale, new EncodeSettings { Extension = ".png" });
-        using var exportedMat = Cv2.ImDecode(exported, ImreadModes.Color);
-        var rendered = renderer.Render(preview!, settings, preview!.Scale);
+        // 二値化より後ろの項目（シャープ 7、枠線 8）を有効にした組み合わせも通す
+        foreach (var (label, configure) in new (string, Action<ProcessingSettings>)[]
+        {
+            ("二値化のみ", _ => { }),
+            ("＋シャープ", s => { s.Sharpen.Enabled = true; s.Sharpen.Value = 100; }),
+            ("＋枠線", s =>
+            {
+                s.Frame.Enabled = true;
+                s.Frame.Thickness = 40;
+                s.Frame.Color = FrameColor.White;
+            }),
+            ("＋シャープ＋枠線", s =>
+            {
+                s.Sharpen.Enabled = true;
+                s.Sharpen.Value = 100;
+                s.Frame.Enabled = true;
+                s.Frame.Thickness = 40;
+                s.Frame.Color = FrameColor.White;
+            }),
+        })
+        {
+            var settings = new ProcessingSettings();
+            settings.Binarize.Enabled = true;
+            configure(settings);
 
-        var fromExport = ReadThreshold(exportedMat);
-        var fromPreview = ReadThreshold(rendered);
+            var exported = renderer.Encode(
+                full!, settings, full!.Scale, new EncodeSettings { Extension = ".png" });
+            using var exportedMat = Cv2.ImDecode(exported, ImreadModes.Color);
+            var rendered = renderer.Render(preview!, settings, preview!.Scale);
 
-        Check($"二値化のしきい値がプレビューと書き出しで一致（{fromPreview} と {fromExport}）",
-            Math.Abs(fromPreview - fromExport) <= 1, $"差 {Math.Abs(fromPreview - fromExport)} 階調");
+            var fromExport = ReadThreshold(exportedMat);
+            var fromPreview = ReadThreshold(rendered);
+
+            Check($"二値化のしきい値がプレビューと書き出しで一致（{label}: {fromPreview} と {fromExport}）",
+                Math.Abs(fromPreview - fromExport) <= 1, $"差 {Math.Abs(fromPreview - fromExport)} 階調");
+        }
     }
 
-    /// 階調の帯で白へ切り替わる位置から、使われたしきい値を逆算する
+    /// <summary>
+    /// 階調の帯で白へ切り替わる位置から、使われたしきい値を逆算する。
+    /// </summary>
+    /// <remarks>
+    /// 左端の一部は読み飛ばす。枠線を有効にした組み合わせでは外周が塗られており、
+    /// 枠線の色をそのまましきい値として読んでしまうため。帯のしきい値は 160 前後
+    /// （画像の 6 割あたり）なので、5% を飛ばしても読み損ねない。
+    /// </remarks>
     private static int ReadThreshold(Mat binarized)
     {
         // 階調の帯は上端から 8% ぶん。その内側を読む
         var y = binarized.Rows / 25;
         var cols = binarized.Cols;
-        for (var x = 0; x < cols; x++)
+        for (var x = cols / 20; x < cols; x++)
         {
             if (binarized.At<Vec3b>(y, x).Item0 == 255)
             {
@@ -1526,8 +1565,10 @@ internal static class Program
         var buffer = new byte[stride * binarized.PixelHeight];
         binarized.CopyPixels(buffer, stride, 0);
 
+        // 左端の読み飛ばしは Mat 版と揃えること。片方だけ直すと、枠線を有効にした
+        // 組み合わせでプレビュー側だけが枠線の色を読み、常に食い違う
         var y = binarized.PixelHeight / 25;
-        for (var x = 0; x < binarized.PixelWidth; x++)
+        for (var x = binarized.PixelWidth / 20; x < binarized.PixelWidth; x++)
         {
             if (buffer[(y * stride) + (x * bytesPerPixel)] == 255)
             {
