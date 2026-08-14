@@ -53,7 +53,7 @@ public sealed class ExportResult
     /// 画面に出せるのは選択中の 1 枚だけなので、全件についてはここで数えて結果に載せる。
     /// <b>書き出し前に出す形は採らない</b> — 全件の寸法を先に読む必要があり、
     /// ヘッダだけ読む方法は WebP が Windows のコーデック拡張に依存するため、
-    /// 入っていない環境で黙って数え落とす。詳細は CLAUDE.md「枠線」。
+    /// 入っていない環境で黙って数え落とす。詳細は docs/design.md「枠線」。
     /// </remarks>
     public int FrameCapped { get; }
 

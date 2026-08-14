@@ -1,6 +1,6 @@
 ﻿# アプリを起動して、指定した大きさのウィンドウを 1 枚撮る。
 #
-# 使い方（CLAUDE.md「構成とビルド」も参照）
+# 使い方（AGENTS.md「構成とビルド」も参照）
 #   pwsh -File tools/screenshot.ps1 -Exe <exe> -Out <出力先.png> [-Width 1000] [-Height 720]
 #                                   [-ExeArgs a,b] [-ScrollEnd]
 #

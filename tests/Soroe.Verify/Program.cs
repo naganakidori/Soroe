@@ -1873,7 +1873,7 @@ internal static class Program
             !settings.IsFrameCapped(4000, 3000), "1920x1440 の 1/4 は 360");
 
         // リサイズを有効にしても、指定より小さい画像は拡大されないので当たる。
-        // 「リサイズすれば全件で揃う」が成り立たない根拠（CLAUDE.md「枠線」）
+        // 「リサイズすれば全件で揃う」が成り立たない根拠（docs/design.md「枠線」）
         Check("リサイズ有効でも小さい画像は頭打ちに当たる",
             settings.IsFrameCapped(120, 90), "120x90 はそのまま出るので 1/4 は 22");
 
@@ -2009,7 +2009,7 @@ internal static class Program
     /// 画面に出せるのは選択中の 1 枚だけなので、全件の内訳はこれが唯一の手段になる。
     /// <b>書き出し前に出す形は採らなかった</b> — 全件の寸法を先に読む必要があり、
     /// ヘッダだけ読む方法（WIC）は WebP が Windows のコーデック拡張に依存するため、
-    /// 入っていない環境で黙って数え落とす。詳細は CLAUDE.md「枠線」。
+    /// 入っていない環境で黙って数え落とす。詳細は docs/design.md「枠線」。
     /// </remarks>
     private static void CheckFrameCapCount(ImageRenderer renderer, string root)
     {

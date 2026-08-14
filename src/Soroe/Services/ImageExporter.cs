@@ -123,7 +123,7 @@ public sealed class ImageExporter : IImageExporter
         var processed = 0;
 
         // 枠線が頭打ちに当たった件数。画面には選択中の 1 枚しか出せないので、
-        // 全件についてはここで数えて結果に載せる（CLAUDE.md「枠線」）
+        // 全件についてはここで数えて結果に載せる（docs/design.md「枠線」）
         var frameCapped = 0;
 
         // 安全ガードの比較対象。リスト内のすべての入力パスと突き合わせる
@@ -140,7 +140,7 @@ public sealed class ImageExporter : IImageExporter
             // （Release、実写 3000×4000、読み込みから書き込みまで）で
             // JPEG 80ms / BMP 85ms に対し、PNG は 0.8 秒、WebP は 1.8 秒かかる。
             // WebP が遅いのはエンコーダ自体の費用で、設定では下げられない。
-            // 再現は tests/Soroe.Verify の --bench（CLAUDE.md「構成とビルド」参照）。
+            // 再現は tests/Soroe.Verify の --bench（AGENTS.md「構成とビルド」参照）。
             // したがって「中止を押してから止まるまで」は、最悪でこの 1 枚分待つことになる。
             // 途中で割り込む作りにすると中途半端なファイルの後始末が要るので、
             // 1 枚を区切りにするこの形は変えない

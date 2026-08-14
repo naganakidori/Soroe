@@ -7,7 +7,7 @@ namespace Soroe.Models;
 /// </summary>
 /// <remarks>
 /// 順序が 1 番目であるため、以降の全項目が回転後の画像を前提にする。噛み合わせは
-/// 次のとおり（CLAUDE.md「適用順序は固定」）。
+/// 次のとおり（docs/design.md「適用順序は固定」）。
 /// <list type="bullet">
 /// <item>リサイズ … 「長辺を N にする」の長辺は 90 度回転で変わらない。
 /// 入れ替わるのはどちらが長辺かだけ</item>
