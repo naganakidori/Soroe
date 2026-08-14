@@ -433,6 +433,13 @@ public sealed partial class ExportDialogViewModel : ObservableObject
             text += $"。{result.Failures.Count} 件は失敗";
         }
 
+        // 枠線の頭打ちは失敗ではないので、失敗一覧ではなくここに出す。
+        // 画面に出せるのは選択中の 1 枚だけなので、全件の内訳はこれが唯一の手段になる
+        if (result.FrameCapped > 0)
+        {
+            text += $"。{result.FrameCapped} 件は画像が小さく、枠線が指定より細くなりました";
+        }
+
         return text;
     }
 

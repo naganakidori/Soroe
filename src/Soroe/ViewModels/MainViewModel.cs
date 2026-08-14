@@ -355,9 +355,7 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
-        var (rotatedWidth, rotatedHeight) =
-            Settings.Rotation.ResolveSize(source.OriginalWidth, source.OriginalHeight);
-        var (width, height) = Settings.Resize.ResolveSize(rotatedWidth, rotatedHeight);
+        var (width, height) = Settings.ResolveOutputSize(source.OriginalWidth, source.OriginalHeight);
         var original = $"{source.OriginalWidth} × {source.OriginalHeight}";
 
         var text = width == source.OriginalWidth && height == source.OriginalHeight

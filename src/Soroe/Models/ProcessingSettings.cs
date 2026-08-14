@@ -99,6 +99,45 @@ public sealed class ProcessingSettings
     public FrameOption Frame { get; } = new();
 
     /// <summary>
+    /// 元画像の寸法に対して、この設定が指す出力寸法を返す。
+    /// </summary>
+    /// <param name="width">元画像の幅。</param>
+    /// <param name="height">元画像の高さ。</param>
+    /// <returns>回転（順序 1）とリサイズ（順序 2）を通した後の寸法。</returns>
+    /// <remarks>
+    /// <b>出力寸法の求め方をこの 1 箇所に閉じる。</b>寸法表示・チェーンの適用・
+    /// 枠線の頭打ち判定がそれぞれ「回転してからリサイズ」を書き写していると、
+    /// 片方だけ直したときに表示と結果が食い違う。二値化のしきい値で同じ形の
+    /// 食い違いを起こしたので、こちらは最初から 1 本にする。
+    /// <para>
+    /// 順序 3 以降は画素値を変えるだけなので寸法に関わらない。順序 8 の枠線は
+    /// 内側に描くので寸法を変えない。
+    /// </para>
+    /// </remarks>
+    public (int Width, int Height) ResolveOutputSize(int width, int height)
+    {
+        var (rotatedWidth, rotatedHeight) = Rotation.ResolveSize(width, height);
+        return Resize.ResolveSize(rotatedWidth, rotatedHeight);
+    }
+
+    /// <summary>
+    /// 元画像の寸法に対して、枠線の太さが頭打ちに当たるかどうかを返す。
+    /// </summary>
+    /// <param name="width">元画像の幅。</param>
+    /// <param name="height">元画像の高さ。</param>
+    /// <returns>指定した太さより細い枠線しか描けない場合は <see langword="true" />。</returns>
+    public bool IsFrameCapped(int width, int height)
+    {
+        if (!Frame.Enabled)
+        {
+            return false;
+        }
+
+        var (outputWidth, outputHeight) = ResolveOutputSize(width, height);
+        return Frame.ResolveThickness(outputWidth, outputHeight) < Frame.Thickness;
+    }
+
+    /// <summary>
     /// 現在の値をそのまま写した別インスタンスを返す。
     /// </summary>
     /// <remarks>

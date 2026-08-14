@@ -1837,6 +1837,49 @@ internal static class Program
         Check("短辺が極端に小さくても 1px は描く",
             frame.ResolveThickness(40, 3) == 1, $"{frame.ResolveThickness(40, 3)}");
 
+        // --- 出力寸法の一元化 ---
+        // 寸法表示・チェーンの適用・頭打ち判定はすべて ResolveOutputSize を通る
+        var settings = new ProcessingSettings();
+        Check("調整なしなら出力寸法は元のまま",
+            settings.ResolveOutputSize(4000, 3000) == (4000, 3000));
+
+        settings.Rotation.Enabled = true;
+        settings.Rotation.Angle = RotationAngle.Clockwise90;
+        Check("回転だけなら縦横が入れ替わる",
+            settings.ResolveOutputSize(4000, 3000) == (3000, 4000),
+            $"{settings.ResolveOutputSize(4000, 3000)}");
+
+        settings.Resize.Enabled = true;
+        settings.Resize.LongestEdge = 1920;
+        Check("回転 → リサイズの順で効く",
+            settings.ResolveOutputSize(4000, 3000) == (1440, 1920),
+            $"{settings.ResolveOutputSize(4000, 3000)}");
+
+        // 頭打ちの判定は、元画像の縦横がどちらでも同じ答えになる。
+        // 短辺は 90 度回転で変わらず、リサイズは縦横を同じ係数で縮めるため。
+        // この不変性のおかげで、Exif の Orientation が効いているかどうかを
+        // 気にせず判定できる
+        settings.Frame.Enabled = true;
+        settings.Frame.Thickness = 200;
+        foreach (var (w, h) in new[] { (4000, 3000), (3000, 4000), (1600, 1200), (120, 90), (90, 120) })
+        {
+            Check($"頭打ちの判定が縦横の入れ替えで変わらない（{w}x{h}）",
+                settings.IsFrameCapped(w, h) == settings.IsFrameCapped(h, w),
+                $"{settings.IsFrameCapped(w, h)} と {settings.IsFrameCapped(h, w)}");
+        }
+
+        settings.Rotation.Enabled = false;
+        Check("リサイズ後の短辺が足りれば頭打ちにならない",
+            !settings.IsFrameCapped(4000, 3000), "1920x1440 の 1/4 は 360");
+
+        // リサイズを有効にしても、指定より小さい画像は拡大されないので当たる。
+        // 「リサイズすれば全件で揃う」が成り立たない根拠（CLAUDE.md「枠線」）
+        Check("リサイズ有効でも小さい画像は頭打ちに当たる",
+            settings.IsFrameCapped(120, 90), "120x90 はそのまま出るので 1/4 は 22");
+
+        settings.Frame.Enabled = false;
+        Check("枠線が無効なら頭打ちにはならない", !settings.IsFrameCapped(120, 90));
+
         // --- 実際に描かれる枠線 ---
         var renderer = new ImageRenderer();
         var plainPath = Path.Combine(root, "plain.png");
@@ -1955,7 +1998,68 @@ internal static class Program
         }
 
         CheckRotationCommutes(renderer, bigPath);
+        CheckFrameCapCount(renderer, root);
         DeleteWithRetry(root);
+    }
+
+    /// <summary>
+    /// 枠線が頭打ちに当たった件数が、書き出しの結果に載るか。
+    /// </summary>
+    /// <remarks>
+    /// 画面に出せるのは選択中の 1 枚だけなので、全件の内訳はこれが唯一の手段になる。
+    /// <b>書き出し前に出す形は採らなかった</b> — 全件の寸法を先に読む必要があり、
+    /// ヘッダだけ読む方法（WIC）は WebP が Windows のコーデック拡張に依存するため、
+    /// 入っていない環境で黙って数え落とす。詳細は CLAUDE.md「枠線」。
+    /// </remarks>
+    private static void CheckFrameCapCount(ImageRenderer renderer, string root)
+    {
+        var input = Path.Combine(root, "cap_in");
+        var output = Path.Combine(root, "cap_out");
+        Directory.CreateDirectory(input);
+        Directory.CreateDirectory(output);
+
+        // 大きい画像 2 枚と、リサイズしても拡大されない小さい画像 1 枚
+        WriteFlat(Path.Combine(input, "big_a.png"), 4000, 3000, 120);
+        WriteFlat(Path.Combine(input, "big_b.png"), 3000, 4000, 120);
+        WriteFlat(Path.Combine(input, "tiny.png"), 120, 90, 120);
+
+        var exporter = new ImageExporter(renderer);
+        var sources = Directory.GetFiles(input).OrderBy(p => p, StringComparer.Ordinal).ToArray();
+        var settings = new Soroe.Models.ExportSettings { Folder = output };
+
+        var processing = new ProcessingSettings();
+        processing.Resize.Enabled = true;
+        processing.Resize.LongestEdge = 1920;
+        processing.Frame.Enabled = true;
+        processing.Frame.Thickness = 30;
+
+        var capped = exporter.Export(sources, settings, processing, null, CancellationToken.None);
+        Check("頭打ちに当たった件数が結果に載る",
+            capped.Exported == 3 && capped.FrameCapped == 1,
+            $"書き出し {capped.Exported} 件 / 頭打ち {capped.FrameCapped} 件");
+
+        // 全件が上限内なら 0。数え方が「枠線が有効なら常に 1」になっていないこと
+        foreach (var file in Directory.GetFiles(output))
+        {
+            File.Delete(file);
+        }
+
+        processing.Frame.Thickness = 20;
+        var withinLimit = exporter.Export(sources, settings, processing, null, CancellationToken.None);
+        Check("全件が上限内なら 0 件",
+            withinLimit.Exported == 3 && withinLimit.FrameCapped == 0,
+            $"頭打ち {withinLimit.FrameCapped} 件");
+
+        // 枠線が無効なら数えない
+        foreach (var file in Directory.GetFiles(output))
+        {
+            File.Delete(file);
+        }
+
+        processing.Frame.Enabled = false;
+        processing.Frame.Thickness = 200;
+        var noFrame = exporter.Export(sources, settings, processing, null, CancellationToken.None);
+        Check("枠線が無効なら 0 件", noFrame.FrameCapped == 0, $"頭打ち {noFrame.FrameCapped} 件");
     }
 
     /// <summary>

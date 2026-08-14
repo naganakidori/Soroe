@@ -122,6 +122,10 @@ public sealed class ImageExporter : IImageExporter
         var canceled = false;
         var processed = 0;
 
+        // 枠線が頭打ちに当たった件数。画面には選択中の 1 枚しか出せないので、
+        // 全件についてはここで数えて結果に載せる（CLAUDE.md「枠線」）
+        var frameCapped = 0;
+
         // 安全ガードの比較対象。リスト内のすべての入力パスと突き合わせる
         var sources = BuildSourceSet(sourcePaths);
 
@@ -176,7 +180,11 @@ public sealed class ImageExporter : IImageExporter
                 // 二度使わないことが目的なので、失敗した枠も空けない
                 reserved.Add(outputPath);
 
-                ExportOne(sourcePath, outputPath, processing, settings);
+                if (ExportOne(sourcePath, outputPath, processing, settings))
+                {
+                    frameCapped++;
+                }
+
                 exported++;
             }
             catch (Exception ex)
@@ -194,16 +202,18 @@ public sealed class ImageExporter : IImageExporter
         }
 
         progress?.Report(new ExportProgress(processed, sourcePaths.Count, string.Empty, string.Empty, false));
-        return ExportResult.Completed(exported, skipped, failures, canceled);
+        return ExportResult.Completed(exported, skipped, frameCapped, failures, canceled);
     }
 
     /// <summary>
     /// 1 枚を書き出す。
     /// </summary>
-    private void ExportOne(
+    /// <returns>枠線の太さが頭打ちに当たった場合は <see langword="true" />。</returns>
+    private bool ExportOne(
         string sourcePath, string outputPath, ProcessingSettings processing, ExportSettings settings)
     {
         byte[] bytes;
+        bool frameCapped;
 
         // 書き出しは原寸で行う。maxEdge に 0 を渡すと縮小されず Scale は 1.0 になる
         using (var source = _renderer.Load(sourcePath, 0))
@@ -212,6 +222,11 @@ public sealed class ImageExporter : IImageExporter
             {
                 throw new UserMessageException("画像を読み込めませんでした");
             }
+
+            // 頭打ちの判定はここでしかできない。画像ごとに短辺が違うので、
+            // 実際に開いてみないと分からない。書き出しは全件を開くので、
+            // ここで数えるぶんには費用がかからない
+            frameCapped = processing.IsFrameCapped(source.OriginalWidth, source.OriginalHeight);
 
             // 拡張子は OutputPathResolver が形式に合わせて決めている
             var encode = new EncodeSettings
@@ -242,6 +257,8 @@ public sealed class ImageExporter : IImageExporter
                 File.Delete(tempPath);
             }
         }
+
+        return frameCapped;
     }
 
     /// <summary>

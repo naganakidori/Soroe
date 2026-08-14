@@ -453,15 +453,12 @@ public sealed class ImageRenderer : IImageRenderer
             result = rotated;
         }
 
-        // 以降の寸法計算は回転後を基準にする。90 度回転で縦横が入れ替わるため、
-        // RenderContext が持つ回転前の寸法をそのまま使うと縦横が食い違う。
-        // 長辺は回転で変わらないのでリサイズの効き自体は同じだが、
-        // 「幅」「高さ」として使う場所は入れ替えなければならない
-        var (sourceWidth, sourceHeight) =
-            settings.Rotation.ResolveSize(context.OriginalWidth, context.OriginalHeight);
-
-        // 出力寸法。枠線の太さの頭打ちにも使うので、リサイズが無効でも求めておく
-        var (targetWidth, targetHeight) = settings.Resize.ResolveSize(sourceWidth, sourceHeight);
+        // 出力寸法。回転で縦横が入れ替わるので、RenderContext が持つ回転前の寸法を
+        // そのまま使ってはいけない。求め方は ProcessingSettings.ResolveOutputSize に
+        // 閉じてあり、寸法表示や枠線の頭打ち判定も同じものを通る。
+        // 枠線の太さの頭打ちにも使うので、リサイズが無効でも求めておく
+        var (targetWidth, targetHeight) =
+            settings.ResolveOutputSize(context.OriginalWidth, context.OriginalHeight);
 
         // 2. リサイズ
         if (settings.Resize.Enabled)
