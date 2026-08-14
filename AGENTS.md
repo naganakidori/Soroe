@@ -21,9 +21,9 @@
 理由と条件は参照先だけに書いてある。ここは名前と参照先しか持たない。
 
 - 適用順序 … [docs/design.md](docs/design.md) の「適用順序は固定」
-- `ImageRenderer.CanonicalEdge` … [docs/pitfalls.md](docs/pitfalls.md)
-- `ImageRenderer.SharpenSigma` … [docs/pitfalls.md](docs/pitfalls.md)
-- `Apply` の `stopBeforeBinarize` を置く位置 … [docs/pitfalls.md](docs/pitfalls.md)
+- `ImageRenderer.CanonicalEdge` … [docs/pitfalls.md](docs/pitfalls.md) の「出力を決める定数と、経路の一致」
+- `ImageRenderer.SharpenSigma` … [docs/pitfalls.md](docs/pitfalls.md) の「出力を決める定数と、経路の一致」
+- `Apply` の `stopBeforeBinarize` を置く位置 … [docs/pitfalls.md](docs/pitfalls.md) の「出力を決める定数と、経路の一致」
 - 安全ガードと実行前の再確認 … [docs/design.md](docs/design.md) の「安全ガード（必須）」
 - 原則 2 に関わるテストの完成条件 … 本ファイルの「コーディング規約」
 
@@ -34,7 +34,7 @@
 次を尋ね、答えられなければ読ませてから始めること。
 
 - 適用順序の 8 番目は何か（答えは [docs/design.md](docs/design.md) の「適用順序は固定」）
-- `CanonicalEdge` を変えると、9 つの調整項目のうちどれの結果が変わるか（答えは [docs/pitfalls.md](docs/pitfalls.md)）
+- `CanonicalEdge` を変えると、9 つの調整項目のうちどれの結果が変わるか（答えは [docs/pitfalls.md](docs/pitfalls.md) の「出力を決める定数と、経路の一致」）
 - 原則 2 に関わるテストは、どこまでやったら完成か（答えは本ファイルの「コーディング規約」）
 
 3 問目は本ファイル、1・2 問目は `docs/` を読まないと答えられない。**答えをここに
@@ -128,7 +128,7 @@ powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Maximi
 数値で指定すると既定サイズの確認にならない（[docs/design.md](docs/design.md) の「既定ウィンドウサイズ」参照）。
 
 `-ScrollEnd` は調整パネルを末尾まで送ってから撮る。項目が増えて画面に収まらなくなったとき、
-末尾の項目まで届くかの確認に使う。**撮影の実装上の注意は [docs/pitfalls.md](docs/pitfalls.md) を参照**（`Graphics.CopyFromScreen` は使わない）。
+末尾の項目まで届くかの確認に使う。**撮影の実装上の注意は [docs/pitfalls.md](docs/pitfalls.md) の「WPF と Win32」を参照**（`Graphics.CopyFromScreen` は使わない）。
 
 #### 性能の数字の扱い（必須）
 
