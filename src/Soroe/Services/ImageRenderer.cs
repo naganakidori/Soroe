@@ -418,7 +418,23 @@ public sealed class ImageRenderer : IImageRenderer
     /// 調整（明るさなど）は倍率の影響を受けない。
     /// </para>
     /// </remarks>
-    private static Mat Apply(Mat original, ProcessingSettings settings, RenderContext context)
+    /// <param name="original">元画像。書き込まない。</param>
+    /// <param name="settings">適用する設定。</param>
+    /// <param name="context">元画像の寸法と、プレビューの倍率。</param>
+    /// <param name="stopBeforeBinarize">
+    /// 6. 二値化の直前で打ち切る。<see cref="ResolveThreshold" /> が、大津に渡す画素を
+    /// 作るために使う。
+    /// <para>
+    /// <b>「二値化の手前までのチェーン」の定義をこの 1 箇所に閉じるための引数である。</b>
+    /// 以前は設定の写しから二値化以降を落として <see cref="Apply" /> を流し直していたが、
+    /// それだと同じ「前半のチェーン」が 2 箇所に書かれることになり、順序が二値化より
+    /// 後ろの項目を足したときに落とし忘れると静かに食い違った（実際に起きた）。
+    /// 打ち切りにすれば、<b>後ろに足した工程はこの return より下に書かれるので、
+    /// 物理的にしきい値の計算へ混ざりようがない。</b>
+    /// </para>
+    /// </param>
+    private static Mat Apply(
+        Mat original, ProcessingSettings settings, RenderContext context, bool stopBeforeBinarize = false)
     {
         // 元画像には書き込まない。毎回コピーから作り直すので画質劣化が蓄積しない
         var result = original.Clone();
@@ -492,6 +508,13 @@ public sealed class ImageRenderer : IImageRenderer
             var gray = ToGray3(result);
             result.Dispose();
             result = gray;
+        }
+
+        // ここから下が「二値化以降」。しきい値を求めるための呼び出しはここで戻る。
+        // 新しい工程をこの行より下に足せば、しきい値の計算には自動的に混ざらない
+        if (stopBeforeBinarize)
+        {
+            return result;
         }
 
         // 6. 二値化（大津）
@@ -635,20 +658,18 @@ public sealed class ImageRenderer : IImageRenderer
     /// canonical へ縮めてチェーンを流し直す。
     /// </para>
     /// <para>
-    /// <b>この 2 経路の一致は構造で保証されていない。</b>縮小が
-    /// <see cref="Downscale" /> という 1 つの関数を通ることは構造の保証だが、
-    /// 「どこまで適用した画素から大津を求めるか」は経路ごとに別々に書いてあり、
-    /// <b>手で揃えている</b>。速い経路が渡してくる <paramref name="current" /> は
-    /// 5. グレースケールまでを適用したもので、遅い経路がそれに合うのは
-    /// <see cref="UpToBinarize" /> が二値化以降を外しているからにすぎない。
-    /// <b>「同じ入力に同じ処理を掛けるから一致する」とは書けない。</b>
-    /// 実際に束 3 でシャープ（順序 7）が増えたとき、遅い経路だけが後段まで通すように
-    /// なって値が食い違っていた（実測で 161 と 150）。
+    /// <b>2 経路が同じ画素を見ることは、二重定義を無くすことで保証している。</b>
+    /// 遅い経路は「設定から二値化以降を落とした写し」ではなく、<see cref="Apply" /> に
+    /// <c>stopBeforeBinarize</c> を渡して同じチェーンを途中で打ち切る。
+    /// 「二値化の手前までのチェーン」の定義が 1 箇所しか無くなるので、順序が二値化より
+    /// 後ろの項目を足しても、それは打ち切りの return より下に書かれ、しきい値の計算へは
+    /// 混ざりようがない。
     /// </para>
     /// <para>
-    /// したがって<b>適用順序が二値化より後ろの項目を足したら、必ず
-    /// <see cref="UpToBinarize" /> にも足すこと。</b>検証は
-    /// <c>CheckThresholdAgreement</c> が後段を有効にした組み合わせで回している。
+    /// 写しを作る作りだったときは、後段を落とし忘れると静かに食い違った。実際、束 3 で
+    /// シャープ（順序 7）を足したときに落とし忘れ、束 4 まで気づかなかった
+    /// （実測で 161 と 150）。<b>「同じ入力に同じ処理を掛けるから一致する」という説明は、
+    /// 前半のチェーンの実装が 1 本しかないときにだけ成り立つ。</b>
     /// </para>
     /// <para>
     /// 代償として、しきい値は原寸ではなく縮小画像から決まる。原寸の大津のほうが
@@ -675,39 +696,16 @@ public sealed class ImageRenderer : IImageRenderer
             return Otsu(current);
         }
 
+        // 書き出し経路。元画像を canonical へ縮めて、同じチェーンを二値化の手前まで流す。
+        // 速い経路が渡してくる current と同じ工程をたどるが、その「同じ」は
+        // 引数で打ち切っているという意味であって、書き写しではない
         using var canonicalResult = Apply(
             canonical,
-            UpToBinarize(settings),
-            new RenderContext(context.OriginalWidth, context.OriginalHeight, canonicalScale));
+            settings,
+            new RenderContext(context.OriginalWidth, context.OriginalHeight, canonicalScale),
+            stopBeforeBinarize: true);
 
         return Otsu(canonicalResult);
-    }
-
-    /// <summary>
-    /// しきい値を求めるための写しを返す。二値化と、それより後ろの項目を外す。
-    /// </summary>
-    /// <remarks>
-    /// 二値化を外すのは、しきい値を求める再帰を 1 段で止めるため。
-    /// <para>
-    /// <b>二値化より後ろの項目も外さなければならない。</b>速い経路
-    /// （<see cref="ResolveThreshold" /> の冒頭）が渡してくるのは 5. グレースケールまでを
-    /// 適用した画素なので、こちらだけ 7. シャープや 8. 枠線まで通すと、同じ画像に
-    /// 対して 2 つの経路が違うしきい値を出す。<b>これは実際に起きていた</b> —
-    /// プレビューは必ず速い経路を通り、書き出しは原寸が canonical を超えると
-    /// 遅い経路を通るため、シャープと二値化を同時に有効にすると両者がずれていた。
-    /// </para>
-    /// <para>
-    /// 枠線はさらに悪い。塗り潰した帯をヒストグラムに混ぜるので、暗い画像に
-    /// 白い枠を付けるだけでしきい値が動く。
-    /// </para>
-    /// </remarks>
-    private static ProcessingSettings UpToBinarize(ProcessingSettings settings)
-    {
-        var copy = settings.Clone();
-        copy.Binarize.Enabled = false;
-        copy.Sharpen.Enabled = false;
-        copy.Frame.Enabled = false;
-        return copy;
     }
 
     /// <summary>大津の方法でしきい値を求める。</summary>
