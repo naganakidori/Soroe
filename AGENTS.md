@@ -12,8 +12,10 @@
 | [docs/decisions.md](docs/decisions.md) | 見送った機能と、見送った理由 | 機能を提案する前。要望に答えるとき |
 | [docs/pitfalls.md](docs/pitfalls.md) | 触ると静かに壊れる箇所 | コードを変更する前に必ず |
 | [docs/design.md](docs/design.md) | 設計方針・機能仕様・画面構成 | 仕様や判断の根拠を確かめるとき |
+| [docs/third-party-sources.md](docs/third-party-sources.md) | 同梱物のライセンス本文の出所 | 依存を上げたとき。表記を作り直すとき |
 
-`docs/` は開発者向け。利用者向けの説明は README が担う。
+`docs/` は開発者向け。利用者向けの説明は README が担う。配布物に同梱するのは
+ルートの `LICENSE` と `THIRD-PARTY-NOTICES.txt`。
 
 ### 触る前に読む
 
