@@ -483,3 +483,11 @@ $RECYCLE.BIN/
 
 # Claude Code
 .claude/settings.local.json
+
+# 配布物
+# tools/pack.ps1 はリポジトリ配下への出力を拒否するので通常はここに出ないが、
+# 手で dotnet publish したときや、うっかり出力先を間違えたときの保険。
+# 上の [Bb]in/ [Oo]bj/ publish/ artifacts/ で拾えない、pack.ps1 が作る名前を足す。
+Soroe-*-win-x64/
+Soroe-*.zip
+[Pp]ublish/
