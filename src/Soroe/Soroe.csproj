@@ -22,6 +22,23 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
+  <!--
+    exe のプロパティに出る情報。不具合の報告を受けたときに版が分かるよう、
+    Version は必ず入れておく。
+    Copyright は LICENSE の表記と 1 文字違わず揃えること。食い違うと、
+    どちらが正しいのか読む人に判断できない。
+    Company は既定だと AssemblyName と同じ "Soroe" になり、実在しない組織のように
+    見えるため、作者名を明示する。
+  -->
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <Product>Soroe</Product>
+    <Company>naganakidori</Company>
+    <Authors>naganakidori</Authors>
+    <Copyright>Copyright (c) 2026 naganakidori</Copyright>
+    <Description>画像の一括処理に特化した Windows デスクトップアプリ</Description>
+  </PropertyGroup>
+
   <ItemGroup>
     <!--
       検証ハーネスからは internal も見えるようにする。層の分離はフォルダ分けと
