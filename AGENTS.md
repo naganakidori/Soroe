@@ -105,6 +105,7 @@ GIMP や Photoshop のような多機能ソフトは「起動しても何をど�
 ```
 Soroe.slnx
 ├ src/Soroe/            アプリ本体（Models / Services / ViewModels / Views / Common）
+│  └ Assets/            アイコンの SVG（サイズごと）と、そこから作る Soroe.ico
 ├ tests/Soroe.Verify/   検証ハーネス（コンソールアプリ）
 └ tools/                作業用スクリプト（画面の撮影など）
 ```
@@ -142,6 +143,26 @@ powershell -ExecutionPolicy Bypass -File tools/screenshot.ps1 -Exe <exe> -Out <�
 
 `-ScrollEnd` は調整パネルを末尾まで送ってから撮る。項目が増えて画面に収まらなくなったとき、
 末尾の項目まで届くかの確認に使う。**撮影の実装上の注意は [docs/pitfalls.md](docs/pitfalls.md) の「WPF と Win32」を参照**（`Graphics.CopyFromScreen` は使わない）。
+
+#### アイコンを作り直す
+
+```
+powershell -ExecutionPolicy Bypass -File tools/make-icon.ps1
+```
+
+`src/Soroe/Assets/icon-<辺>.svg` から `Soroe.ico` を作る。**意匠を変えるときは SVG を直し、
+これを走らせて `.ico` も一緒にコミットすること**（ビルドは `.ico` しか見ない）。
+
+- **アイコンはサイズごとに別の絵。** 256 を縮小すると 16 で滲む。7 サイズ
+  （16 / 20 / 24 / 32 / 48 / 64 / 256）の SVG を手で書いてある
+- **`.ico` を手で編集しない。** 出所は SVG
+- **SVG は `<rect>` しか解釈しない。** 知らない要素が来たら例外で止まる。
+  黙って無視すると「SVG は直したのに `.ico` が変わらない」という気づけない壊れ方をする
+- **16px の意匠は、できあがった `.ico` の画素から検査する**（帯 3 本・幅と間隔が揃っている・
+  帯 3px 以上・間隔 2px 以上）。崩れていたら `.ico` を消して止まる。
+  向きの理由は [docs/decisions.md](docs/decisions.md) の「アプリのアイコン」
+- 反映先は csproj の `ApplicationIcon` だけでよい。**WPF は `Window.Icon` が未指定なら
+  exe に埋め込まれたものを使う**ので、書き出しダイアログにも個別の指定は要らない（実測で確認済み）
 
 #### 配布物を作る
 

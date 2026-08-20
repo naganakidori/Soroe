@@ -20,6 +20,14 @@
 
     <!-- 長いパスを許可する。詳細は app.manifest のコメントを参照 -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!--
+      exe に埋め込むアイコン。Assets/icon-<辺>.svg から tools/make-icon.ps1 で
+      作る。.ico を手で編集しないこと（SVG が出所）。
+      WPF は Window.Icon が未指定なら exe に埋め込まれたこれを使うので、
+      ウィンドウ側に個別の指定は要らない。
+    -->
+    <ApplicationIcon>Assets\Soroe.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!--
