@@ -3,10 +3,10 @@
 *A Windows desktop app for batch image processing. The user interface is in Japanese only.*
 
 たくさんの画像を、**同じ設定でまとめて揃える** Windows 用のソフトです。
-リサイズ・明るさ・枠線など 9 つの調整を選んで、フォルダごと一度に書き出します。
+リサイズ・明るさ・枠線など 7 つの調整を選んで、フォルダごと一度に書き出します。
 **画面で見えているプレビューが、そのまま書き出されます。**
 
-![Soroe の主画面。左に 7 件の画像ファイルの一覧、右上に調整後のプレビューと「6000 × 4000 → 1920 × 1280　枠線 24px」の表示、その下に 9 つの調整項目。リサイズ・明るさ・コントラスト・彩度・シャープ・枠線がオン、回転・グレースケール・二値化がオフ](docs/images/main.png)
+![Soroe の主画面。左に 7 件の画像ファイルの一覧、右上に調整後のプレビューと「6000 × 4000 → 1920 × 1280　枠線 24px」の表示、その下に 7 つの調整項目。リサイズ・明るさ・コントラスト・彩度・シャープ・枠線がオン、回転がオフ](docs/images/main.png)
 
 ## ダウンロード
 
@@ -36,9 +36,7 @@ zip を好きな場所に解凍して、`Soroe.exe` を実行するだけです�
 | | リサイズ | 長辺を指定の px 以内に収める |
 | 画素値を変える | 明るさ | 明るく／暗く |
 | | コントラスト | メリハリを強く／弱く |
-| | 彩度 | 鮮やかに／地味に |
-| | グレースケール | 白黒にする |
-| | 二値化 | 白と黒だけにする |
+| | 彩度 | 鮮やかに／地味に。**下限まで下げると白黒になります** |
 | | シャープ | 輪郭をはっきりさせる |
 | 描き足す | 枠線 | 内側に白／黒／グレーの枠を描く |
 
@@ -89,7 +87,6 @@ zip を好きな場所に解凍して、`Soroe.exe` を実行するだけです�
 - **透過は白で塗り潰されます。** 透過 PNG を読み込むと、透明な部分は白になります
 - **サブフォルダは読みません。** 選んだフォルダの直下にある画像だけが対象です
 - **拡大はしません。** リサイズで指定した長辺より小さい画像は、そのままの大きさで出ます
-- **二値化のしきい値は画像ごとに自動で決まります。** 数値で指定することはできません
 - **枠線は画像の内側に描きます。** 外周が少し隠れますが、**出力サイズは変わりません**
 - **シャープはプレビューでは分かりにくいことがあります。** 効き目は書き出しサイズに対して
   決まるため、縮小して表示しているプレビューでは差が小さく見えます
@@ -113,8 +110,8 @@ Soroe は [MIT ライセンス](LICENSE) です。
 ## English
 
 **Soroe** is a Windows desktop app for batch image processing. Drop a folder of
-images, pick from nine adjustments (rotate, resize, brightness, contrast,
-saturation, grayscale, binarize, sharpen, border), and export them all at once.
+images, pick from seven adjustments (rotate, resize, brightness, contrast,
+saturation, sharpen, border), and export them all at once.
 What you see in the preview is what gets written.
 
 **The user interface is in Japanese only**, and there are no plans to translate it.
