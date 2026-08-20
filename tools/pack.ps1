@@ -1,7 +1,7 @@
 ﻿# 配布用の zip を作る。発行 → 不要ファイルの削除 → 検査 → 圧縮 まで通す。
 #
 # 使い方（AGENTS.md「構成とビルド」も参照）
-#   pwsh -File tools/pack.ps1 -Out <出力先フォルダの絶対パス>
+#   powershell -ExecutionPolicy Bypass -File tools/pack.ps1 -Out <出力先フォルダの絶対パス>
 #
 # 出力先は絶対パスで渡すこと。相対パスは実行時の作業フォルダ（多くはリポジトリ
 # 直下）に解決され、100MB 近い成果物がリポジトリに紛れ込む。リポジトリ配下も拒否する。

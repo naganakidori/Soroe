@@ -1,8 +1,8 @@
 ﻿# アプリを起動して、指定した大きさのウィンドウを 1 枚撮る。
 #
 # 使い方（AGENTS.md「構成とビルド」も参照）
-#   pwsh -File tools/screenshot.ps1 -Exe <exe> -Out <出力先.png> [-Width 1000] [-Height 720]
-#                                   [-ExeArgs a,b] [-ScrollEnd]
+#   powershell -ExecutionPolicy Bypass -File tools/screenshot.ps1
+#       -Exe <exe> -Out <出力先.png> [-Width 1000] [-Height 720] [-ExeArgs a,b] [-ScrollEnd]
 #
 #   -ScrollEnd を付けると、縦にスクロールできる領域（調整パネル）を末尾まで
 #   送ってから撮る。項目が増えて画面に収まらなくなったときの確認に使う。

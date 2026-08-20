@@ -115,6 +115,13 @@ Soroe.slnx
 
 以下はリポジトリ直下で、標準のシェル（Windows なら PowerShell）から実行する。
 
+**`.ps1` には `-ExecutionPolicy Bypass` を付ける。** Windows クライアントの実行ポリシーは
+既定が `Restricted` で、`.ps1` **ファイル**の実行を一切許さない（同じ内容を対話的に打ち込む
+分には通るので気づきにくい）。付け忘れると `UnauthorizedAccess` で止まる。**エージェントの
+シェルは `Process` スコープが `Bypass` で起動されていることがあり、その場合ここで止まらない。
+手元で通ったことが、利用者の環境で通る証拠にならない。** 恒久的に変えるなら
+`Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` を各自で実行する。
+
 ```
 dotnet run --project src/Soroe            # 実行
 dotnet run --project tests/Soroe.Verify   # 検証（全通過なら終了コード 0）
@@ -124,9 +131,9 @@ dotnet run --project tests/Soroe.Verify -c Release -- --bench
 dotnet run --project tests/Soroe.Verify -c Release -- --bench 写真.jpg   # 実写を使う
 
 # 画面の撮影。見た目の確認に使う（出力先は絶対パスで渡すこと）
-powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png>                        # 既定サイズ
-powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Width 720 -Height 600 -ScrollEnd
-powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Maximize
+powershell -ExecutionPolicy Bypass -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png>                        # 既定サイズ
+powershell -ExecutionPolicy Bypass -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Width 720 -Height 600 -ScrollEnd
+powershell -ExecutionPolicy Bypass -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Maximize
 ```
 
 `-Width` / `-Height` は XAML と同じ**論理ピクセル**で受け取る（内部で DPI 倍率を掛ける）。
@@ -139,7 +146,7 @@ powershell -File tools/screenshot.ps1 -Exe <exe> -Out <絶対パス.png> -Maximi
 #### 配布物を作る
 
 ```
-powershell -File tools/pack.ps1 -Out <出力先フォルダの絶対パス>
+powershell -ExecutionPolicy Bypass -File tools/pack.ps1 -Out <出力先フォルダの絶対パス>
 ```
 
 発行 → 不要ファイルの削除 → 検査 → 圧縮までを 1 コマンドで行い、
