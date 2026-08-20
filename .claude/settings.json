@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "defaultMode": "acceptEdits",
     "allow": [
       "PowerShell(dotnet build *)",
       "PowerShell(dotnet run *)",
