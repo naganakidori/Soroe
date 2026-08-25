@@ -3,8 +3,8 @@
 # 使い方（AGENTS.md「構成とビルド」も参照）
 #   powershell -ExecutionPolicy Bypass -File tools/make-icon.ps1
 #
-# アイコンは「サイズごとに別の絵」である。256 の絵を縮小すると、16 では帯と
-# 間隔が半端な位置に落ちて滲む。そのため src/Soroe/Assets/icon-<辺>.svg を
+# アイコンは「サイズごとに別の絵」である。256 の絵を縮小すると、小さいサイズでは
+# 境界が半端な位置に落ちて滲む。そのため src/Soroe/Assets/icon-<辺>.svg を
 # サイズごとに手で書き、それぞれを実寸で描いて 1 つの .ico にまとめる。
 #
 # SVG は <rect> しか解釈しない。角丸矩形しか使わないと決めているので、完全な
@@ -52,20 +52,36 @@ function Convert-SvgToBitmap([string]$path) {
     $visual = New-Object System.Windows.Media.DrawingVisual
     $dc = $visual.RenderOpen()
     $drawn = 0
+    $lefts = @()
+    $bottoms = @()
     foreach ($node in $svg.ChildNodes) {
         if ($node.NodeType -ne [System.Xml.XmlNodeType]::Element) { continue }
         if ($node.LocalName -ne 'rect') { throw "解釈できない要素 <$($node.LocalName)>: $path" }
         $fill = $node.GetAttribute('fill')
         if ([string]::IsNullOrEmpty($fill)) { throw "fill の無い rect: $path" }
-        $rect = New-Object System.Windows.Rect(
-            [double]$node.GetAttribute('x'), [double]$node.GetAttribute('y'),
-            [double]$node.GetAttribute('width'), [double]$node.GetAttribute('height'))
+        $x = [double]$node.GetAttribute('x')
+        $y = [double]$node.GetAttribute('y')
+        $w = [double]$node.GetAttribute('width')
+        $h = [double]$node.GetAttribute('height')
+        $rect = New-Object System.Windows.Rect($x, $y, $w, $h)
         $radius = [double]$node.GetAttribute('rx')
         $dc.DrawRoundedRectangle((New-FrozenBrush $fill), $null, $rect, $radius, $radius)
+        $lefts += $x
+        $bottoms += ($y + $h)
         $drawn++
     }
     $dc.Close()
     if ($drawn -eq 0) { throw "rect が 1 つも無い: $path" }
+
+    # 揃いは座標で見る。描いた画素から測ると角丸の中間色で 1px ぶれて、
+    # 揃っていても落ちたり、理由を取り違えたりする（実際にそうなった）。
+    # 座標なら厳密で、しかも 16px だけでなく全サイズを見られる。
+    if (@($lefts | Select-Object -Unique).Count -ne 1) {
+        throw "左端が揃っていない（$($lefts -join ' / ')）: $path"
+    }
+    if (@($bottoms | Select-Object -Unique).Count -ne 1) {
+        throw "下端が揃っていない（$($bottoms -join ' / ')）: $path"
+    }
 
     $bmp = New-Object System.Windows.Media.Imaging.RenderTargetBitmap(
         $width, $height, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
@@ -195,8 +211,9 @@ $extra   = @($found | Where-Object { $RequiredSizes -notcontains $_ })
 if ($missing.Count -gt 0) { Remove-Item $outPath -Force; throw "必要なサイズが入っていない: $($missing -join ', ')" }
 if ($extra.Count -gt 0)   { Remove-Item $outPath -Force; throw "仕様に無いサイズが入っている: $($extra -join ', ')" }
 
-# 16px は「3 枚が離れて見える」ことがこの意匠の要。間隔が角丸に食われて
-# 1 枚の塊になる失敗を、実際の画素から数えて捕まえる。
+# 16px で「大きさの違う 3 枚が見分けられる」ことがこの意匠の要。上の層が
+# 下の層を覆い隠して 2 枚に見える失敗を、実際の画素から捕まえる。
+# 揃っているかどうかは Convert-SvgToBitmap が座標で見ている。
 $decoder = New-Object System.Windows.Media.Imaging.IconBitmapDecoder(
     (New-Object Uri($outPath)),
     [System.Windows.Media.Imaging.BitmapCreateOptions]::None,
@@ -213,46 +230,32 @@ $stride = 16 * 4
 $buf = New-Object byte[] ($stride * 16)
 $conv.CopyPixels($buf, $stride, 0)
 
-# 列ごとにインクの有無を取り、連なりに畳む。
-$ink = New-Object bool[] 16
-for ($x = 0; $x -lt 16; $x++) {
-    for ($y = 0; $y -lt 16; $y++) {
-        if ($buf[$y * $stride + $x * 4 + 3] -gt 0) { $ink[$x] = $true; break }
+# 色ごとに、見えている画素の数を数える。角の中間色を層と数えないよう、
+# 完全に不透明な画素だけを見る。塗りの色そのものは書かない。書くと
+# 「意匠と検査が同じ表を見る」ことになり、色を変えたときに両方が同時に
+# 変わって素通りする。
+$counts = @{}
+for ($y = 0; $y -lt 16; $y++) {
+    for ($x = 0; $x -lt 16; $x++) {
+        $o = $y * $stride + $x * 4
+        if ($buf[$o + 3] -ne 255) { continue }
+        $key = '{0:X2}{1:X2}{2:X2}' -f $buf[$o + 2], $buf[$o + 1], $buf[$o]
+        if ($counts.ContainsKey($key)) { $counts[$key]++ } else { $counts[$key] = 1 }
     }
 }
-$runs = @()
-$runStart = 0
-for ($x = 1; $x -le 16; $x++) {
-    if ($x -eq 16 -or $ink[$x] -ne $ink[$runStart]) {
-        $runs += [PSCustomObject]@{ Ink = $ink[$runStart]; Len = ($x - $runStart) }
-        $runStart = $x
-    }
-}
-$bars = @($runs | Where-Object { $_.Ink } | ForEach-Object { $_.Len })
-# 両端の余白は「間隔」ではないので、帯にはさまれた分だけを見る。
-$first = 0
-while ($first -lt $runs.Count -and -not $runs[$first].Ink) { $first++ }
-$last = $runs.Count - 1
-while ($last -ge 0 -and -not $runs[$last].Ink) { $last-- }
-$inner = @()
-for ($i = $first; $i -le $last; $i++) { if (-not $runs[$i].Ink) { $inner += $runs[$i].Len } }
+# 12 画素に満たないものは、角丸の重なりでできた混色とみなして層に数えない。
+$layers = @($counts.GetEnumerator() | Where-Object { $_.Value -ge 12 })
 
-$why = $null
-if ($bars.Count -ne 3) {
-    $why = "帯が 3 本に分かれていない（$($bars.Count) 本に見えている）"
-} elseif (($bars | Select-Object -Unique).Count -ne 1) {
-    $why = "帯の幅が揃っていない（$($bars -join ' / ') px）"
-} elseif ($bars[0] -lt 3) {
-    $why = "帯が細すぎる（$($bars[0]) px。3px 以上必要）"
-} elseif (($inner | Select-Object -Unique).Count -ne 1) {
-    $why = "間隔が揃っていない（$($inner -join ' / ') px）"
-} elseif ($inner[0] -lt 2) {
-    # 間隔 1px は角丸に食われて 1 枚の塊に見える。案 A で実際にそうなった。
-    $why = "間隔が狭すぎる（$($inner[0]) px。2px 以上必要）"
+if ($layers.Count -ne 3) {
+    $seen = ($counts.GetEnumerator() | Sort-Object { -$_.Value } |
+        Select-Object -First 5 | ForEach-Object { "$($_.Key):$($_.Value)" }) -join ' '
+    Remove-Item $outPath -Force
+    throw "16px で 3 枚が見分けられない（12 画素以上の色が $($layers.Count) 色。上位: $seen）"
 }
-if ($null -ne $why) { Remove-Item $outPath -Force; throw "16px の意匠が崩れている: $why" }
 
+$areas = ($layers | Sort-Object { -$_.Value } | ForEach-Object { $_.Value }) -join ' / '
 $len = (Get-Item $outPath).Length
 Write-Output ""
 Write-Output ("完成: {0}" -f $outPath)
-Write-Output ("  {0:N0} バイト / {1} 枚 / 16px は帯 3 本" -f $len, $count)
+Write-Output ("  {0:N0} バイト / {1} 枚" -f $len, $count)
+Write-Output ("  16px で 3 枚が見分けられる（面積 {0} 画素）。揃いは SVG の座標で確認済み" -f $areas)
